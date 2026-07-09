@@ -751,7 +751,13 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
     const file = e.target.files?.[0];
     if (!file || !file.type?.startsWith("image/")) return;
     const reader = new FileReader();
-    reader.onload = () => setImageDataUrl(reader.result);
+    reader.onload = () => {
+      const dataUrl = reader.result;
+      setImageDataUrl(dataUrl);
+      // 画像を選んだ時点で読み取りを始め、手動でボタンを押す手間をなくす。
+      // state の反映を待たず、選択した元画像をそのまま解析に渡す。
+      autoScan(dataUrl);
+    };
     reader.readAsDataURL(file);
     e.target.value = "";
   }
@@ -771,18 +777,18 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
     }
   }
 
-  async function autoScan() {
-    if (!imageDataUrl) return;
+  async function autoScan(targetImage = imageDataUrl) {
+    if (!targetImage || scanning) return;
     setScanning(true);
     let detectedStore = "";
     let detectedDate = "";
     let detectedName = "";
     try {
       setScanMessage("バーコードを解析中…");
-      let barcodeText = await scanBarcode(imageDataUrl);
+      let barcodeText = await scanBarcode(targetImage);
 
       setScanMessage("文字を認識中…（初回は時間がかかります）");
-      const { text, lines } = await scanText(imageDataUrl, (pct) =>
+      const { text, lines } = await scanText(targetImage, (pct) =>
         setScanMessage(`文字を認識中…${pct}%`)
       );
       detectedDate = extractExpiryDate(text);
@@ -1038,7 +1044,7 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
             {imageDataUrl && (
               <div style={{ marginBottom: 14 }}>
                 <button
-                  onClick={autoScan}
+                  onClick={() => autoScan()}
                   disabled={scanning}
                   style={{
                     display: "flex",
@@ -1531,6 +1537,13 @@ export default function CouponApp() {
           const detectedStore = detectStoreFromBarcode(barcodeText);
           const detectedDate = extractExpiryDate(text);
           const detectedName = extractProductNameGuess(lines);
+          const dup = barcodeText
+            ? findDuplicateCoupon(coupons, barcodeText, coupon.id)
+            : null;
+
+          // 店舗まで判別でき、重複でもない画像は、その場で未整理から
+          // 該当店舗の未使用一覧へ振り分ける。要確認のものだけ未整理に残す。
+          const canAutoRegister = !!detectedStore && !dup;
           toSave = {
             ...toSave,
             barcode: normalizeBarcode(barcodeText) || barcodeText || "",
@@ -1538,11 +1551,16 @@ export default function CouponApp() {
             expiresAt: detectedDate || "",
             productName: detectedName || "",
             autoScanned: true,
+            inbox: !canAutoRegister,
+            updatedAt: new Date().toISOString(),
           };
         } catch (e) {
           console.error("[quickAdd] 自動読み取りに失敗しました", e);
           toSave = { ...toSave, autoScanned: true };
         }
+
+        // 読み取り結果と振り分けを、画像圧縮・クラウド保存の完了前にも画面へ反映する。
+        setCoupons((prev) => prev.map((c) => (c.id === coupon.id ? toSave : c)));
 
         try {
           toSave = { ...toSave, imageDataUrl: await compressImageForStorage(imageDataUrl) };

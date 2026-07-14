@@ -8,7 +8,7 @@ import {
   ExternalLink,
   Ticket,
   Clock,
-  Layers,
+  ArrowUpDown,
   ScanLine,
   Send,
   ChevronLeft,
@@ -64,6 +64,16 @@ const COLORS = {
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 
 const STORAGE_KEY = "coupons:list";
+
+// ビルド時にvite.config.jsのdefineで注入される「アプリの更新日」。
+// 家族の端末で表示中のアプリが最新版かどうかをヘッダーで確認できるようにする。
+const BUILD_DATE = typeof __BUILD_DATE__ !== "undefined" ? __BUILD_DATE__ : "";
+
+// 期限切れ・使用済みは HIDE_AFTER_DAYS 日で一覧から非表示にし、
+// DELETE_AFTER_DAYS 日まではクラウドに残す（誤操作からの復元猶予。
+// 猶予期間中はFirebaseコンソールから復元できる。将来「最近削除したもの」ビューを足す余地あり）
+const HIDE_AFTER_DAYS = 2;
+const DELETE_AFTER_DAYS = 30;
 
 /* ---------------------------------------------------------
    店舗マスタ
@@ -153,6 +163,36 @@ function fmtDate(dateStr) {
   ).padStart(2, "0")}`;
 }
 
+function fmtDateShort(dateStr) {
+  if (!dateStr) return "";
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return "";
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+// 旧localStorageから移行したクーポンはcreatedAtを持たないことがあるため、
+// updatedAtで代用し、どちらも無ければ最古（0）として扱う
+function createdAtMs(coupon) {
+  const raw = coupon.createdAt || coupon.updatedAt || "";
+  const t = raw ? new Date(raw).getTime() : NaN;
+  return Number.isFinite(t) ? t : 0;
+}
+
+// 期限切れ・使用済みから一定日数経ったクーポンは一覧・件数から隠す
+// （物理削除はDELETE_AFTER_DAYSまで行わず、復元の猶予を残す）
+function isHiddenByAge(coupon) {
+  const status = computeStatus(coupon);
+  if (status === "expired") {
+    const d = daysUntil(coupon.expiresAt);
+    return d !== null && d <= -HIDE_AFTER_DAYS;
+  }
+  if (status === "used") {
+    const d = daysSince(coupon.usedAt);
+    return d !== null && d >= HIDE_AFTER_DAYS;
+  }
+  return false;
+}
+
 /* ---------------------------------------------------------
    スタンプ（ステータスバッジ）
 --------------------------------------------------------- */
@@ -194,12 +234,16 @@ function StampBadge({ status }) {
 function StoreBadge({ store, small }) {
   if (!store) return null;
   const cfg = storeColors(store);
+  // カード上（small）は「セブンイレブン」だと横幅を圧迫して期限表示が潰れるため短縮名にする
+  const label = small
+    ? STORES.find((s) => s.key === store)?.short || storeLabel(store)
+    : storeLabel(store);
   return (
     <span
       style={{
         display: "inline-flex",
         alignItems: "center",
-        padding: small ? "2px 8px" : "4px 10px",
+        padding: small ? "2px 6px" : "4px 10px",
         borderRadius: 999,
         border: `1.5px solid ${cfg.color}`,
         color: cfg.color,
@@ -210,7 +254,7 @@ function StoreBadge({ store, small }) {
         whiteSpace: "nowrap",
       }}
     >
-      {storeLabel(store)}
+      {label}
     </span>
   );
 }
@@ -252,7 +296,7 @@ function StoreChips({ value, onChange }) {
 /* ---------------------------------------------------------
    チケット半券カード（署名要素）
 --------------------------------------------------------- */
-function TicketCard({ coupon, onOpen, selectMode, selected, onToggleSelect }) {
+function TicketCard({ coupon, onOpen, selected, onToggleSelect }) {
   const status = computeStatus(coupon);
   const d = daysUntil(coupon.expiresAt);
   const urgent = status === "unused" && d !== null && d <= 2;
@@ -275,7 +319,7 @@ function TicketCard({ coupon, onOpen, selectMode, selected, onToggleSelect }) {
 
   return (
     <button
-      onClick={() => (selectMode ? onToggleSelect(coupon.id) : onOpen(coupon))}
+      onClick={() => onOpen(coupon)}
       style={{
         display: "flex",
         width: "100%",
@@ -290,12 +334,29 @@ function TicketCard({ coupon, onOpen, selectMode, selected, onToggleSelect }) {
         position: "relative",
       }}
     >
-      {selectMode && (
+      {/* 複数選択チェック（常時表示。タップしてもカードは開かず選択だけ切り替わる） */}
+      <div
+        role="checkbox"
+        aria-checked={selected}
+        aria-label={selected ? "選択を外す" : "選択する"}
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggleSelect(coupon.id);
+        }}
+        style={{
+          position: "absolute",
+          top: 0,
+          bottom: 0,
+          left: 0,
+          width: 44,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 2,
+        }}
+      >
         <div
           style={{
-            position: "absolute",
-            top: 10,
-            left: 10,
             width: 22,
             height: 22,
             borderRadius: "50%",
@@ -304,12 +365,11 @@ function TicketCard({ coupon, onOpen, selectMode, selected, onToggleSelect }) {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            zIndex: 2,
           }}
         >
           {selected && <Check size={13} color="#fff" />}
         </div>
-      )}
+      </div>
 
       {/* 本体 */}
       <div
@@ -318,7 +378,7 @@ function TicketCard({ coupon, onOpen, selectMode, selected, onToggleSelect }) {
           paddingTop: 14,
           paddingRight: 16,
           paddingBottom: 14,
-          paddingLeft: selectMode ? 40 : 16,
+          paddingLeft: 44,
           minWidth: 0,
         }}
       >
@@ -346,7 +406,7 @@ function TicketCard({ coupon, onOpen, selectMode, selected, onToggleSelect }) {
           style={{
             display: "flex",
             alignItems: "center",
-            gap: 6,
+            gap: 4,
             marginTop: 4,
             overflow: "hidden",
           }}
@@ -354,15 +414,29 @@ function TicketCard({ coupon, onOpen, selectMode, selected, onToggleSelect }) {
           <span
             style={{
               fontFamily: "'M PLUS Rounded 1c', sans-serif",
-              fontSize: 12,
+              fontSize: 11,
               color: COLORS.muted,
               whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
+              flexShrink: 0,
             }}
           >
-            期限 {fmtDate(coupon.expiresAt)}
+            {/* モバイル幅でも潰れないよう、カード上は M/D の短い表記にする（詳細画面は年つき）。
+                期限が省略されると使えるかどうか判断できなくなるため、この列は縮めない */}
+            期限 {fmtDateShort(coupon.expiresAt) || "未設定"}
           </span>
+          {fmtDateShort(coupon.createdAt || coupon.updatedAt) && (
+            <span
+              style={{
+                fontFamily: "'M PLUS Rounded 1c', sans-serif",
+                fontSize: 11,
+                color: COLORS.muted,
+                whiteSpace: "nowrap",
+                flexShrink: 0,
+              }}
+            >
+              追加 {fmtDateShort(coupon.createdAt || coupon.updatedAt)}
+            </span>
+          )}
           <StoreBadge store={coupon.store} small />
         </div>
       </div>
@@ -546,7 +620,7 @@ function QuickAddBar({ onQuickAdd }) {
 }
 
 /* ---------------------------------------------------------
-   レジで見せるセット（複数画像を選んですぐスワイプ表示）
+   画像ファイル→dataURL変換（貼るだけバーの複数選択用）
 --------------------------------------------------------- */
 function filesToDataUrls(fileList) {
   const files = [...(fileList || [])].filter((f) => f.type?.startsWith("image/"));
@@ -559,138 +633,6 @@ function filesToDataUrls(fileList) {
           reader.readAsDataURL(file);
         })
     )
-  );
-}
-
-function UseSetButton({ onClick }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 6,
-        padding: "9px 14px",
-        borderRadius: 999,
-        border: `1.5px solid ${COLORS.ink}`,
-        background: COLORS.ink,
-        color: COLORS.paper,
-        fontFamily: "'M PLUS Rounded 1c', sans-serif",
-        fontWeight: 700,
-        fontSize: 13,
-        whiteSpace: "nowrap",
-        cursor: "pointer",
-        flexShrink: 0,
-      }}
-    >
-      <Layers size={15} />
-      セット
-    </button>
-  );
-}
-
-function UseSetViewer({ images, onClose }) {
-  const [index, setIndex] = useState(0);
-
-  function handleScroll(e) {
-    const el = e.currentTarget;
-    if (!el.clientWidth) return;
-    setIndex(Math.round(el.scrollLeft / el.clientWidth));
-  }
-
-  return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "#111",
-        zIndex: 60,
-        display: "flex",
-        flexDirection: "column",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          padding: "16px 18px 10px",
-        }}
-      >
-        <span
-          style={{
-            color: "#fff",
-            fontFamily: "'M PLUS Rounded 1c', sans-serif",
-            fontSize: 13,
-            letterSpacing: "0.05em",
-          }}
-        >
-          {images.length ? `${index + 1} / ${images.length}` : ""}
-        </span>
-        <button
-          onClick={onClose}
-          style={{
-            width: 34,
-            height: 34,
-            borderRadius: "50%",
-            border: "none",
-            background: "rgba(255,255,255,0.15)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            cursor: "pointer",
-          }}
-        >
-          <X size={18} color="#fff" />
-        </button>
-      </div>
-
-      <div
-        onScroll={handleScroll}
-        style={{
-          flex: 1,
-          display: "flex",
-          overflowX: "auto",
-          scrollSnapType: "x mandatory",
-          WebkitOverflowScrolling: "touch",
-        }}
-      >
-        {images.map((src, i) => (
-          <div
-            key={i}
-            style={{
-              flex: "0 0 100%",
-              scrollSnapAlign: "center",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              padding: "8px 12px",
-              boxSizing: "border-box",
-            }}
-          >
-            <img
-              src={src}
-              alt={`セット画像 ${i + 1}`}
-              style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", borderRadius: 10 }}
-            />
-          </div>
-        ))}
-      </div>
-
-      <div style={{ display: "flex", justifyContent: "center", gap: 6, padding: "12px 0 26px" }}>
-        {images.map((_, i) => (
-          <div
-            key={i}
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: "50%",
-              background: i === index ? "#fff" : "rgba(255,255,255,0.35)",
-            }}
-          />
-        ))}
-      </div>
-    </div>
   );
 }
 
@@ -1433,13 +1375,23 @@ export default function CouponApp() {
   const [tab, setTab] = useState("unused");
   const [storeFilter, setStoreFilter] = useState("all");
   const [daysFilter, setDaysFilter] = useState("");
+  // 並び順は端末ごとの好みなのでlocalStorageに保持する
+  const [sortKey, setSortKey] = useState(() => localStorage.getItem("coupons:sortKey") || "expiry");
   const [openCoupon, setOpenCoupon] = useState(null);
-  const [useSetImages, setUseSetImages] = useState(null);
-  const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
-  const [combinedPicker, setCombinedPicker] = useState(false);
   const [expiryBannerDismissed, setExpiryBannerDismissed] = useState(false);
   const [bulkScanProgress, setBulkScanProgress] = useState(null);
+  const [toasts, setToasts] = useState([]);
+  const [syncError, setSyncError] = useState(false);
+
+  // 保存・削除の失敗を画面上部に数秒だけ表示する（alertの代わり）
+  function notify(message) {
+    const id = uid();
+    setToasts((prev) => [...prev, { id, message }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 5000);
+  }
 
   // 家族共有クラウド（Firestore）に接続し、以後はリアルタイムに同期する
   useEffect(() => {
@@ -1458,15 +1410,18 @@ export default function CouponApp() {
             if (cancelled) return;
             setCoupons(list.map((c) => ({ store: "", inbox: false, barcode: "", ...c })));
             setLoaded(true);
+            setSyncError(false);
           },
           (e) => {
             console.error("[coupons] 同期に失敗しました", e);
             setLoaded(true);
+            if (!cancelled) setSyncError(true);
           }
         );
       } catch (e) {
         console.error("[coupons] 接続に失敗しました", e);
         setLoaded(true);
+        if (!cancelled) setSyncError(true);
       }
     })();
 
@@ -1476,21 +1431,22 @@ export default function CouponApp() {
     };
   }, []);
 
-  // 期限切れ・使用済みになってから2日経ったクーポンは自動で削除する
+  // 期限切れ・使用済みになってからDELETE_AFTER_DAYS日経ったクーポンを自動で削除する
+  // （HIDE_AFTER_DAYS日で一覧から消えるが、それまでは復元できるようクラウドに残す）
   useEffect(() => {
     if (!loaded) return;
     coupons.forEach((c) => {
       const status = computeStatus(c);
       if (status === "expired") {
         const d = daysUntil(c.expiresAt);
-        if (d !== null && d <= -2) {
+        if (d !== null && d <= -DELETE_AFTER_DAYS) {
           deleteCouponFromCloud(c.id).catch((e) => {
             console.error("[autoCleanup] 期限切れクーポンの削除に失敗しました", c.id, e);
           });
         }
       } else if (status === "used") {
         const d = daysSince(c.usedAt);
-        if (d !== null && d >= 2) {
+        if (d !== null && d >= DELETE_AFTER_DAYS) {
           deleteCouponFromCloud(c.id).catch((e) => {
             console.error("[autoCleanup] 使用済みクーポンの削除に失敗しました", c.id, e);
           });
@@ -1572,7 +1528,7 @@ export default function CouponApp() {
         await saveCouponToCloud(toSave);
       } catch (e) {
         console.error("[quickAdd] 保存に失敗しました", e);
-        window.alert("クラウドへの保存に失敗しました。通信環境を確認してもう一度お試しください。");
+        notify("クラウドへの保存に失敗しました。通信環境を確認してもう一度お試しください。");
       }
     })();
   }
@@ -1582,7 +1538,7 @@ export default function CouponApp() {
     setOpenCoupon(updated);
     saveCouponToCloud(updated).catch((e) => {
       console.error("[updateCoupon] 保存に失敗しました", e);
-      window.alert("クラウドへの保存に失敗しました。通信環境を確認してもう一度お試しください。");
+      notify("クラウドへの保存に失敗しました。通信環境を確認してもう一度お試しください。");
     });
   }
 
@@ -1591,7 +1547,7 @@ export default function CouponApp() {
     setOpenCoupon(null);
     deleteCouponFromCloud(id).catch((e) => {
       console.error("[deleteCoupon] 削除に失敗しました", e);
-      window.alert("クラウドでの削除に失敗しました。通信環境を確認してもう一度お試しください。");
+      notify("クラウドでの削除に失敗しました。通信環境を確認してもう一度お試しください。");
     });
   }
 
@@ -1658,35 +1614,8 @@ export default function CouponApp() {
     );
   }
 
-  function toggleSelectMode() {
-    setSelectMode((v) => !v);
-    setSelectedIds([]);
-    setCombinedPicker(false);
-  }
-
   function toggleSelected(id) {
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
-  }
-
-  // ヘッダーの「セット」ボタン：未使用・未整理をまとめた一覧から選ぶモードに入る
-  function startHeaderSetPicker() {
-    setCombinedPicker(true);
-    setSelectMode(true);
-    setSelectedIds([]);
-  }
-
-  function openSetFromSelection() {
-    const images = coupons
-      .filter((c) => selectedIds.includes(c.id) && c.imageDataUrl)
-      .map((c) => c.imageDataUrl);
-    if (!images.length) {
-      window.alert("選択したクーポンに画像がありません（URLクーポンはセットに表示できません）");
-      return;
-    }
-    setUseSetImages(images);
-    setSelectMode(false);
-    setSelectedIds([]);
-    setCombinedPicker(false);
   }
 
   // 選択したクーポンをまとめて使用済みにする
@@ -1706,14 +1635,17 @@ export default function CouponApp() {
     setCoupons((prev) =>
       prev.map((c) => updatedList.find((u) => u.id === c.id) || c)
     );
+    let saveErrorNotified = false;
     updatedList.forEach((u) => {
       saveCouponToCloud(u).catch((e) => {
         console.error("[markSelectedAsUsed] 保存に失敗しました", u.id, e);
+        if (!saveErrorNotified) {
+          saveErrorNotified = true;
+          notify("一部のクーポンをクラウドに保存できませんでした。通信環境を確認してください。");
+        }
       });
     });
-    setSelectMode(false);
     setSelectedIds([]);
-    setCombinedPicker(false);
   }
 
   const urgentCoupons = useMemo(() => {
@@ -1724,14 +1656,20 @@ export default function CouponApp() {
     });
   }, [coupons]);
 
+  // LINE取り込みで届いた、まだ自動読み取りしていない未整理クーポンの数。
+  // 手動追加分は追加時に背景で解析されるため対象外（解析中の数秒間バナーが
+  // 点滅するのを避ける）。LINE経由の未読取分はこのバナーから読み取ってもらう。
+  const pendingScanCount = useMemo(
+    () =>
+      coupons.filter(
+        (c) => c.source === "line" && c.inbox && c.imageDataUrl && !c.autoScanned && !isHiddenByAge(c)
+      ).length,
+    [coupons]
+  );
+
   const filtered = useMemo(() => {
-    let list = coupons.map((c) => ({ ...c, _status: computeStatus(c) }));
-    if (combinedPicker) {
-      // ヘッダーの「セット」ボタン用：未使用・未整理のみをまとめて表示する
-      list = list.filter((c) => c._status === "unused" || c._status === "inbox");
-    } else {
-      list = list.filter((c) => c._status === tab);
-    }
+    let list = coupons.filter((c) => !isHiddenByAge(c)).map((c) => ({ ...c, _status: computeStatus(c) }));
+    list = list.filter((c) => c._status === tab);
     if (storeFilter !== "all") list = list.filter((c) => c.store === storeFilter);
     if (daysFilter) {
       const limit = Number(daysFilter);
@@ -1741,23 +1679,26 @@ export default function CouponApp() {
       });
     }
     list.sort((a, b) => {
-      // 未整理（貼っただけ）は新しい順で先頭に、それ以外は期限が近い順
+      if (sortKey === "created") return createdAtMs(b) - createdAtMs(a);
+      if (sortKey === "createdAsc") return createdAtMs(a) - createdAtMs(b);
+      // 期限順（デフォルト）: 未整理（貼っただけ）は新しい順で先頭に、それ以外は期限が近い順
       if (a.inbox !== b.inbox) return a.inbox ? -1 : 1;
-      if (a.inbox && b.inbox) {
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-      }
+      if (a.inbox && b.inbox) return createdAtMs(b) - createdAtMs(a);
       const da = a.expiresAt ? new Date(a.expiresAt).getTime() : Infinity;
       const db = b.expiresAt ? new Date(b.expiresAt).getTime() : Infinity;
       return da - db;
     });
     return list;
-  }, [coupons, tab, storeFilter, daysFilter, combinedPicker]);
+  }, [coupons, tab, storeFilter, daysFilter, sortKey]);
 
   const openIndex = openCoupon ? filtered.findIndex((c) => c.id === openCoupon.id) : -1;
 
   const counts = useMemo(() => {
     const c = { inbox: 0, unused: 0, used: 0, expired: 0 };
-    coupons.forEach((cp) => (c[computeStatus(cp)] += 1));
+    coupons.forEach((cp) => {
+      if (isHiddenByAge(cp)) return;
+      c[computeStatus(cp)] += 1;
+    });
     return c;
   }, [coupons]);
 
@@ -1783,7 +1724,7 @@ export default function CouponApp() {
           "radial-gradient(circle at 1px 1px, rgba(91,74,72,0.06) 1px, transparent 0)",
         backgroundSize: "16px 16px",
         fontFamily: "'M PLUS Rounded 1c', sans-serif",
-        paddingBottom: selectMode ? 24 : 100,
+        paddingBottom: 100,
       }}
     >
       {/* ヘッダー */}
@@ -1793,6 +1734,9 @@ export default function CouponApp() {
             <Ticket size={20} color={COLORS.forest} />
             <span style={{ fontFamily: "'M PLUS Rounded 1c', sans-serif", fontSize: 11, color: COLORS.muted, letterSpacing: "0.1em" }}>
               COUPON MANAGER
+            </span>
+            <span style={{ fontFamily: "'M PLUS Rounded 1c', sans-serif", fontSize: 10, color: COLORS.muted, whiteSpace: "nowrap" }}>
+              更新 {fmtDateShort(BUILD_DATE)}
             </span>
           </div>
           <h1
@@ -1826,9 +1770,59 @@ export default function CouponApp() {
           >
             <RefreshCw size={17} color={COLORS.ink} />
           </button>
-          <UseSetButton onClick={startHeaderSetPicker} />
         </div>
       </header>
+
+      {/* クラウド同期エラーのお知らせ（復旧するまで表示し続ける） */}
+      {syncError && (
+        <div style={{ padding: "0 18px 14px" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              border: `1.5px solid ${COLORS.crimson}`,
+              background: COLORS.crimsonSoft,
+              borderRadius: 12,
+              padding: "10px 12px",
+            }}
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div
+                style={{
+                  fontFamily: "'M PLUS Rounded 1c', sans-serif",
+                  fontWeight: 700,
+                  fontSize: 13,
+                  color: COLORS.crimson,
+                  marginBottom: 2,
+                }}
+              >
+                クラウドと同期できていません
+              </div>
+              <div style={{ fontFamily: "'M PLUS Rounded 1c', sans-serif", fontSize: 12, color: COLORS.ink }}>
+                表示が古い可能性があります。通信環境を確認してください。
+              </div>
+            </div>
+            <button
+              onClick={() => window.location.reload()}
+              style={{
+                flexShrink: 0,
+                padding: "8px 12px",
+                borderRadius: 10,
+                border: "none",
+                background: COLORS.crimson,
+                color: "#FFFDFB",
+                fontFamily: "'M PLUS Rounded 1c', sans-serif",
+                fontWeight: 700,
+                fontSize: 12,
+                cursor: "pointer",
+              }}
+            >
+              再読み込み
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 期限が近いクーポンのお知らせ */}
       {loaded && !expiryBannerDismissed && urgentCoupons.length > 0 && (
@@ -1892,8 +1886,62 @@ export default function CouponApp() {
         </div>
       )}
 
-      {/* 期限で絞り込み */}
-      <div style={{ padding: "0 18px 14px" }}>
+      {/* 読み取り待ち（LINE取り込みなど）のお知らせ */}
+      {loaded && pendingScanCount > 0 && (
+        <div style={{ padding: "0 18px 14px" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              border: `1.5px solid ${COLORS.amber}`,
+              background: COLORS.amberSoft,
+              borderRadius: 12,
+              padding: "10px 12px",
+            }}
+          >
+            <ScanLine size={16} color={COLORS.amber} style={{ flexShrink: 0 }} />
+            <div
+              style={{
+                flex: 1,
+                minWidth: 0,
+                fontFamily: "'M PLUS Rounded 1c', sans-serif",
+                fontWeight: 700,
+                fontSize: 13,
+                color: COLORS.amber,
+              }}
+            >
+              読み取り待ちのクーポンが{pendingScanCount}件あります
+            </div>
+            <button
+              onClick={() => {
+                setTab("inbox");
+                bulkScanInbox();
+              }}
+              disabled={!!bulkScanProgress}
+              style={{
+                flexShrink: 0,
+                padding: "8px 12px",
+                borderRadius: 10,
+                border: "none",
+                background: bulkScanProgress ? COLORS.line : COLORS.amber,
+                color: "#FFFDFB",
+                fontFamily: "'M PLUS Rounded 1c', sans-serif",
+                fontWeight: 700,
+                fontSize: 12,
+                cursor: bulkScanProgress ? "not-allowed" : "pointer",
+              }}
+            >
+              {bulkScanProgress
+                ? `読み取り中…${bulkScanProgress.done}/${bulkScanProgress.total}`
+                : "まとめて読み取る"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 期限で絞り込み＋並び替え */}
+      <div style={{ padding: "0 18px 14px", display: "flex", gap: 8 }}>
         <div
           style={{
             display: "flex",
@@ -1903,9 +1951,11 @@ export default function CouponApp() {
             border: `1.5px solid ${COLORS.line}`,
             borderRadius: 10,
             padding: "9px 12px",
+            flex: 1,
+            minWidth: 0,
           }}
         >
-          <Clock size={15} color={COLORS.muted} />
+          <Clock size={15} color={COLORS.muted} style={{ flexShrink: 0 }} />
           <select
             value={daysFilter}
             onChange={(e) => setDaysFilter(e.target.value)}
@@ -1914,6 +1964,7 @@ export default function CouponApp() {
               outline: "none",
               background: "transparent",
               flex: 1,
+              minWidth: 0,
               fontFamily: "'M PLUS Rounded 1c', sans-serif",
               fontSize: 14,
               color: COLORS.ink,
@@ -1926,41 +1977,65 @@ export default function CouponApp() {
             <option value="30">30日以内</option>
           </select>
         </div>
-      </div>
-
-      {/* タブ */}
-      {combinedPicker ? (
-        <div style={{ padding: "0 18px 10px" }}>
-          <span
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            background: "#FFF9F6",
+            border: `1.5px solid ${COLORS.line}`,
+            borderRadius: 10,
+            padding: "9px 12px",
+            flex: 1,
+            minWidth: 0,
+          }}
+        >
+          <ArrowUpDown size={15} color={COLORS.muted} style={{ flexShrink: 0 }} />
+          <select
+            value={sortKey}
+            onChange={(e) => {
+              setSortKey(e.target.value);
+              localStorage.setItem("coupons:sortKey", e.target.value);
+            }}
             style={{
+              border: "none",
+              outline: "none",
+              background: "transparent",
+              flex: 1,
+              minWidth: 0,
               fontFamily: "'M PLUS Rounded 1c', sans-serif",
-              fontSize: 13,
-              fontWeight: 700,
-              color: COLORS.crimson,
+              fontSize: 14,
+              color: COLORS.ink,
             }}
           >
-            未使用・未整理からセットするクーポンを選んでください
-          </span>
+            <option value="expiry">期限が近い順</option>
+            <option value="created">追加が新しい順</option>
+            <option value="createdAsc">追加が古い順</option>
+          </select>
         </div>
-      ) : (
-      <div style={{ display: "flex", gap: 6, padding: "0 18px 10px", overflowX: "auto" }}>
+      </div>
+
+      {/* タブ（4つを横スクロールなしでモバイル幅に収める） */}
+      <div style={{ display: "flex", gap: 5, padding: "0 18px 10px" }}>
         {tabs.map((t) => (
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
             style={{
-              flexShrink: 0,
+              flex: 1,
+              minWidth: 0,
               display: "flex",
               alignItems: "center",
-              gap: 6,
-              padding: "8px 14px",
+              justifyContent: "center",
+              gap: 3,
+              padding: "8px 2px",
               borderRadius: 999,
               border: `1.5px solid ${tab === t.key ? COLORS.ink : COLORS.line}`,
               background: tab === t.key ? COLORS.ink : "transparent",
               color: tab === t.key ? COLORS.paper : COLORS.muted,
               fontFamily: "'M PLUS Rounded 1c', sans-serif",
               fontWeight: 700,
-              fontSize: 13,
+              fontSize: 12,
               cursor: "pointer",
               whiteSpace: "nowrap",
             }}
@@ -1969,7 +2044,7 @@ export default function CouponApp() {
             <span
               style={{
                 fontFamily: "'M PLUS Rounded 1c', sans-serif",
-                fontSize: 11,
+                fontSize: 10,
                 opacity: 0.8,
               }}
             >
@@ -1978,7 +2053,6 @@ export default function CouponApp() {
           </button>
         ))}
       </div>
-      )}
 
       {/* 店舗フィルタ */}
       <div style={{ display: "flex", gap: 6, padding: "0 18px 16px", overflowX: "auto" }}>
@@ -2005,68 +2079,40 @@ export default function CouponApp() {
         ))}
       </div>
 
-      {/* まとめて自動読み取り／選択してセットする */}
-      {(filtered.length > 0 || (tab === "inbox" && bulkScanProgress)) && (
+      {/* まとめて自動読み取り／まとめて選択 */}
+      {tab === "inbox" && (filtered.length > 0 || bulkScanProgress) && (
         <div
           style={{
             padding: "0 18px 12px",
             display: "flex",
-            justifyContent: "space-between",
             alignItems: "center",
             gap: 8,
           }}
         >
-          {tab === "inbox" && !selectMode ? (
-            <button
-              onClick={bulkScanInbox}
-              disabled={!!bulkScanProgress}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                padding: "7px 12px",
-                borderRadius: 999,
-                border: `1.5px solid ${COLORS.forest}`,
-                background: bulkScanProgress ? COLORS.line : COLORS.forestSoft,
-                color: COLORS.forest,
-                fontFamily: "'M PLUS Rounded 1c', sans-serif",
-                fontWeight: 700,
-                fontSize: 12,
-                cursor: bulkScanProgress ? "not-allowed" : "pointer",
-                whiteSpace: "nowrap",
-              }}
-            >
-              <ScanLine size={13} />
-              {bulkScanProgress
-                ? `読み取り中…${bulkScanProgress.done}/${bulkScanProgress.total}`
-                : "まとめて自動読み取り"}
-            </button>
-          ) : (
-            <span />
-          )}
-          {filtered.length > 0 && (
-            <button
-              onClick={toggleSelectMode}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                padding: "7px 12px",
-                borderRadius: 999,
-                border: `1.5px solid ${selectMode ? COLORS.crimson : COLORS.line}`,
-                background: selectMode ? COLORS.crimsonSoft : "transparent",
-                color: selectMode ? COLORS.crimson : COLORS.muted,
-                fontFamily: "'M PLUS Rounded 1c', sans-serif",
-                fontWeight: 700,
-                fontSize: 12,
-                cursor: "pointer",
-                whiteSpace: "nowrap",
-              }}
-            >
-              <Layers size={13} />
-              {selectMode ? "選択をやめる" : "選んでセットする"}
-            </button>
-          )}
+          <button
+            onClick={bulkScanInbox}
+            disabled={!!bulkScanProgress}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "7px 12px",
+              borderRadius: 999,
+              border: `1.5px solid ${COLORS.forest}`,
+              background: bulkScanProgress ? COLORS.line : COLORS.forestSoft,
+              color: COLORS.forest,
+              fontFamily: "'M PLUS Rounded 1c', sans-serif",
+              fontWeight: 700,
+              fontSize: 12,
+              cursor: bulkScanProgress ? "not-allowed" : "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            <ScanLine size={13} />
+            {bulkScanProgress
+              ? `読み取り中…${bulkScanProgress.done}/${bulkScanProgress.total}`
+              : "まとめて自動読み取り"}
+          </button>
         </div>
       )}
 
@@ -2096,7 +2142,6 @@ export default function CouponApp() {
               key={c.id}
               coupon={c}
               onOpen={setOpenCoupon}
-              selectMode={selectMode}
               selected={selectedIds.includes(c.id)}
               onToggleSelect={toggleSelected}
             />
@@ -2104,8 +2149,8 @@ export default function CouponApp() {
         )}
       </div>
 
-      {/* 選択中の操作バー */}
-      {selectMode && (
+      {/* 選択中の操作バー（1件でも選ぶと出る） */}
+      {selectedIds.length > 0 && (
         <div
           style={{
             position: "fixed",
@@ -2135,7 +2180,7 @@ export default function CouponApp() {
           </span>
           <div style={{ display: "flex", gap: 8 }}>
             <button
-              onClick={toggleSelectMode}
+              onClick={() => setSelectedIds([])}
               style={{
                 padding: "10px 14px",
                 borderRadius: 10,
@@ -2167,23 +2212,6 @@ export default function CouponApp() {
             >
               使用済みに
             </button>
-            <button
-              onClick={openSetFromSelection}
-              disabled={selectedIds.length === 0}
-              style={{
-                padding: "10px 16px",
-                borderRadius: 10,
-                border: "none",
-                background: selectedIds.length ? COLORS.ink : COLORS.line,
-                color: COLORS.paper,
-                fontFamily: "'M PLUS Rounded 1c', sans-serif",
-                fontWeight: 700,
-                fontSize: 13,
-                cursor: selectedIds.length ? "pointer" : "not-allowed",
-              }}
-            >
-              セットして表示
-            </button>
           </div>
         </div>
       )}
@@ -2205,12 +2233,72 @@ export default function CouponApp() {
           position={openIndex >= 0 ? { index: openIndex, total: filtered.length } : null}
         />
       )}
-      {useSetImages && (
-        <UseSetViewer images={useSetImages} onClose={() => setUseSetImages(null)} />
-      )}
 
-      {/* とりあえず貼るだけ（未整理へ／画面下部固定） */}
-      {!selectMode && <QuickAddBar onQuickAdd={quickAdd} />}
+      {/* とりあえず貼るだけ（未整理へ／画面下部固定。選択中は操作バーを優先） */}
+      {selectedIds.length === 0 && <QuickAddBar onQuickAdd={quickAdd} />}
+
+      {/* エラートースト（画面上部・自動で消える） */}
+      {toasts.length > 0 && (
+        <div
+          style={{
+            position: "fixed",
+            top: "calc(8px + env(safe-area-inset-top))",
+            left: 18,
+            right: 18,
+            zIndex: 80,
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+          }}
+        >
+          {toasts.map((t) => (
+            <div
+              key={t.id}
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 10,
+                border: `1.5px solid ${COLORS.crimson}`,
+                background: COLORS.crimsonSoft,
+                borderRadius: 12,
+                padding: "10px 12px",
+                boxShadow: "0 4px 16px rgba(91,74,72,0.15)",
+              }}
+            >
+              <span
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  fontFamily: "'M PLUS Rounded 1c', sans-serif",
+                  fontWeight: 700,
+                  fontSize: 13,
+                  color: COLORS.crimson,
+                }}
+              >
+                {t.message}
+              </span>
+              <button
+                onClick={() => setToasts((prev) => prev.filter((x) => x.id !== t.id))}
+                aria-label="通知を閉じる"
+                style={{
+                  flexShrink: 0,
+                  width: 24,
+                  height: 24,
+                  borderRadius: "50%",
+                  border: "none",
+                  background: "transparent",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                }}
+              >
+                <X size={15} color={COLORS.crimson} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

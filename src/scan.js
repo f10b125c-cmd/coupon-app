@@ -266,7 +266,15 @@ function tidySpacing(s) {
 
 // 案内文などの定型ノイズ（商品名ではありえない行）
 const NOISE_PATTERN =
-  /クーポン|スクリーンショット|受付|利用期間|ください|下さい|バーコード|レジ|有効期限|同時利用|お1人様|お一人様|注意|対象|画面|提示/;
+  /クーポン|スクリーンショット|受付|利用期間|ください|下さい|バーコード|レジ|有効期限|同時利用|お1人様|お一人様|注意|対象|画面|提示|詳細をみる|お問合せ|お客様|再読み込み|再読込/;
+
+// 「（税込237円）」のような価格表記がある行は、コンビニクーポンでは
+// ほぼ確実に商品名の行に付いているため、他のどのルールよりも強い手がかりになる
+const PRICE_PATTERN = /[(（]\s*税込\s*[\d０-９,，]+\s*円\s*[)）]/;
+
+function stripPrice(t) {
+  return t.replace(PRICE_PATTERN, "").trim();
+}
 
 // 行テキストを商品名として整える。「◯本と引き換え〜」などの定型の尻尾を落とし、
 // ノイズ行・数字だらけの行なら空文字を返す。
@@ -274,8 +282,10 @@ function cleanProductLine(raw) {
   let t = tidySpacing(raw);
   const bracket = t.match(/「(.+?)」/);
   if (bracket) t = bracket[1];
-  // 「◯本と引き換え〜」「無料引き換えクーポン」「無料引換クーポン」などの定型の尻尾を落とす
-  t = t.replace(/(?:\d+\s*(?:本|個|つ|杯|枚|袋|缶))?\s*(?:コンビニ)?\s*(?:無料)?\s*と?\s*引き?換え?.*$/, "").trim();
+  // 「◯本と引き換え〜」「無料引き換えクーポン」「無料引換クーポン」「いずれか◯本と引き換え〜」
+  // などの定型の尻尾を落とす。「いずれか」は商品名を含まずこの尻尾だけの行になっていることがあり、
+  // 落とさずに残すと切り落とし後の残りカス（「いずれか」）が誤って商品名として採用されてしまう。
+  t = t.replace(/(?:いずれか)?\s*(?:\d+\s*(?:本|個|つ|杯|枚|袋|缶))?\s*(?:コンビニ)?\s*(?:無料)?\s*と?\s*引き?換え?.*$/, "").trim();
   // 行の折り返しで「〜無料引き」までで途切れた尻尾も落とす
   t = t.replace(/(?:コンビニ)?\s*無料\s*引?き?$/, "").trim();
   if (t.length < 3) return "";
@@ -283,6 +293,16 @@ function cleanProductLine(raw) {
   const digitRatio = (t.match(/\d/g) || []).length / t.length;
   if (digitRatio >= 0.5) return "";
   return t;
+}
+
+// 定型文除去のあとに数字・単位語しか残らなかった行（「4)350ml缶」など）は、
+// 商品名がもっと上の別行に書かれていて、この行は末尾の断片に過ぎない可能性が高い。
+// そのため商品名の手がかりとしては採用しない。
+function hasEnoughNameChars(t) {
+  const core = t
+    .replace(/[\d０-９()（）\-‐—,，.。:：\s]/g, "")
+    .replace(/ml|ML|ｍｌ|缶|ボトル|パック|袋|カップ|杯|個|本/g, "");
+  return core.length >= 3;
 }
 
 // テキストが縦に大きく途切れている箇所＝商品画像などの領域とみなし、
@@ -304,6 +324,15 @@ function findLineBelowLargestGap(lines) {
 export function extractProductNameGuess(lines) {
   if (!lines || !lines.length) return "";
 
+  // 0) 「（税込237円）」のような価格表記がある行は最有力の手がかりなので最優先で使う
+  for (const { text } of lines) {
+    const tidied = tidySpacing(text);
+    if (PRICE_PATTERN.test(tidied)) {
+      const name = cleanProductLine(stripPrice(tidied));
+      if (name) return name;
+    }
+  }
+
   // 1) 商品名はだいたい商品画像のすぐ下に書かれているので、
   //    テキストの大きな縦空白（＝画像領域）の直後の行を最優先で採用する
   const belowImage = findLineBelowLargestGap(lines);
@@ -322,11 +351,32 @@ export function extractProductNameGuess(lines) {
   }
 
   // 3) 「◯◯◯と引き換え」「◯◯◯無料引換クーポン」の◯◯◯部分
-  for (const { text } of lines) {
-    const tidied = tidySpacing(text);
-    if (/引き?換え?/.test(tidied)) {
-      const name = cleanProductLine(tidied);
-      if (name) return name;
+  const pageBottom = Math.max(...lines.map((l) => l.y1 || l.y));
+  for (let i = 0; i < lines.length; i++) {
+    const tidied = tidySpacing(lines[i].text);
+    if (!/引き?換え?/.test(tidied)) continue;
+    const name = cleanProductLine(tidied);
+    if (name && hasEnoughNameChars(name)) return name;
+
+    // 長い商品名は「商品名／350ml缶／いずれか1本無料引換えクーポン」のように
+    // 複数行に折り返されてOCRされることがあり、この行単体では断片しか残らない。
+    // 縦に近接している直前の行（＝同じ段落）を最大2行さかのぼって連結して再判定する。
+    // ただし画像の上部2割はスマホのステータスバーやブラウザのタブ見出しが並ぶ領域で、
+    // そこにある引換行はページタイトルであり、さかのぼるとUI行を巻き込むため連結しない。
+    if (lines[i].y < pageBottom * 0.2) continue;
+    let joined = tidied;
+    for (let k = i - 1; k >= 0 && k >= i - 2; k--) {
+      const prev = lines[k];
+      const below = lines[k + 1];
+      const prevTidied = tidySpacing(prev.text);
+      // 「…」はタブ見出しの切り詰め表示に特有なので、その行は商品名に巻き込まない
+      if (/[…]/.test(prevTidied)) break;
+      const prevHeight = Math.max((prev.y1 || prev.y) - prev.y, 1);
+      const gap = below.y - (prev.y1 || prev.y);
+      if (gap > prevHeight * 1.8) break; // 行間が開きすぎ＝別ブロックなので連結しない
+      joined = prevTidied + joined;
+      const joinedName = cleanProductLine(joined);
+      if (joinedName && hasEnoughNameChars(joinedName)) return joinedName;
     }
   }
 
@@ -335,6 +385,8 @@ export function extractProductNameGuess(lines) {
     .map(({ text }) => cleanProductLine(text))
     .filter(Boolean)
     .map((text) => ({ text }));
-  const productLike = candidates.find(({ text }) => /(ml|ML|ｍｌ|缶|ボトル|パック|袋|カップ|杯|個|本)/.test(text));
+  const productLike = candidates.find(
+    ({ text }) => /(ml|ML|ｍｌ|缶|ボトル|パック|袋|カップ|杯|個|本)/.test(text) && hasEnoughNameChars(text)
+  );
   return (productLike || candidates[0])?.text || "";
 }

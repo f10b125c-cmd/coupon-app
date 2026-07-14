@@ -3,6 +3,10 @@ import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 
 export default defineConfig({
+  // アプリの更新日（ビルド実行日時）。ヘッダーの「更新 M/D」表示に使う
+  define: {
+    __BUILD_DATE__: JSON.stringify(new Date().toISOString()),
+  },
   plugins: [
     react(),
     VitePWA({

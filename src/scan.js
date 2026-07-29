@@ -161,8 +161,11 @@ export async function scanText(imageDataUrl, onProgress) {
   try {
     const img = await loadImage(imageDataUrl);
     const canvas = toBoundedCanvas(img, 2000);
-    normalTarget = canvas.toDataURL("image/jpeg", 0.9);
-    invertedTarget = invertCanvas(canvas).toDataURL("image/jpeg", 0.9);
+    // 保存済みの画像はすでにJPEG圧縮されている。ここでさらにJPEGへ再エンコードすると
+    // 圧縮ノイズが二重にかかって細い文字が潰れるうえ、JPEGの出力は端末ごとに違うため
+    // 同じ画像でも端末によってOCR結果が変わってしまう。可逆なPNGにして差をなくす。
+    normalTarget = canvas.toDataURL("image/png");
+    invertedTarget = invertCanvas(canvas).toDataURL("image/png");
   } catch (e) {
     // 縮小に失敗しても元画像でOCRを続行する（反転パスはスキップ）
   }
@@ -255,18 +258,77 @@ export function extractBarcodeNumberGuess(text) {
   return best;
 }
 
+// OCRは似た字形の括弧をよく取り違える（「→『、〈→《 など）。
+// 商品名は「◯◯」や〈◯◯〉の括弧を手がかりに切り出しているため、判定前に字形を揃える。
+function normalizeBrackets(s) {
+  return s
+    .replace(/[『｢]/g, "「")
+    .replace(/[』｣]/g, "」")
+    .replace(/[《＜<]/g, "〈")
+    .replace(/[》＞>]/g, "〉");
+}
+
 // OCRが日本語の文字間に入れてしまう半角スペースを取り除く
 function tidySpacing(s) {
-  return s
+  return normalizeBrackets(s)
     .replace(/([^\x00-\x7F])\s+(?=[^\x00-\x7F])/g, "$1")
-    .replace(/\s*([<>＜＞（）()])\s*/g, "$1")
+    .replace(/\s*([〈〉（）()])\s*/g, "$1")
+    // 「350ml 缶」「1 本」のように半角英数と日本語の間に入った空白も詰める
+    .replace(/([A-Za-z0-9%])\s+([ぁ-んァ-ヶ一-龠])/g, "$1$2")
     .replace(/\s{2,}/g, " ")
     .trim();
 }
 
+function removeFirstChar(s, ch, count) {
+  let out = s;
+  for (let i = 0; i < count; i++) out = out.replace(ch, "");
+  return out;
+}
+
+function removeLastChar(s, ch, count) {
+  let out = s;
+  for (let i = 0; i < count; i++) {
+    const idx = out.lastIndexOf(ch);
+    if (idx < 0) break;
+    out = out.slice(0, idx) + out.slice(idx + 1);
+  }
+  return out;
+}
+
+const BRACKET_PAIRS = [
+  ["「", "」"],
+  ["〈", "〉"],
+  ["(", ")"],
+  ["（", "）"],
+];
+
+// OCRは括弧を二重に拾うことがある（〈ダブルレモン〉が「〈ダブルレモン)〉」になるなど）。
+// 重なった括弧と、相方のない括弧を落として商品名を読みやすくする。
+function tidyBrackets(t) {
+  let s = t;
+  // 開き括弧の直後・閉じ括弧の直前に重なった括弧（と、括弧と読み違えられた「く」）を1つにまとめる。
+  // 例: 〈ダブルレモン〉が「〈くダブルレモン)〉」「〈ダブルレモン〉〉」と読まれる。
+  s = s.replace(/〈[〈くク(（]+/g, "〈");
+  s = s.replace(/[〉)）]+〉/g, "〉");
+  s = s.replace(/「[「]+/g, "「");
+  s = s.replace(/[」]+」/g, "」");
+  for (const [open, close] of BRACKET_PAIRS) {
+    const opens = s.split(open).length - 1;
+    const closes = s.split(close).length - 1;
+    if (opens > closes) s = removeFirstChar(s, open, opens - closes);
+    else if (closes > opens) s = removeLastChar(s, close, closes - opens);
+  }
+  return s.trim();
+}
+
 // 案内文などの定型ノイズ（商品名ではありえない行）
 const NOISE_PATTERN =
-  /クーポン|スクリーンショット|受付|利用期間|ください|下さい|バーコード|レジ|有効期限|同時利用|お1人様|お一人様|注意|対象|画面|提示|詳細をみる|お問合せ|お客様|再読み込み|再読込/;
+  // OCRは「ください」の「く」を落として「ださい」と読むことがあるため、
+  // 「ださい」で拾って両方に効かせる（同様に「下さい」も部分一致で拾う）。
+  /クーポン|スクリーンショット|受付|利用期間|ださい|下さい|バーコード|レジ|有効期限|同時利用|お1人様|お一人様|注意|対象|画面|提示|詳細をみる|お問合せ|お客様|再読み込み|再読込|賞品|当選者|引換えは|申し付|スキャン/;
+
+// 商品名らしさの手がかりになる単位語
+const PRODUCT_UNIT_PATTERN = /(ml|ML|ｍｌ|缶|ボトル|パック|袋|カップ|杯|個|本)/;
 
 // 「（税込237円）」のような価格表記がある行は、コンビニクーポンでは
 // ほぼ確実に商品名の行に付いているため、他のどのルールよりも強い手がかりになる
@@ -276,33 +338,67 @@ function stripPrice(t) {
   return t.replace(PRICE_PATTERN, "").trim();
 }
 
+// 開き鉤括弧「は細い縦棒なのでOCRが 1 / r / l / I などの文字と読み違えやすい。
+// 閉じ「」だけが残っている行は、本来そこに「があったとみなして
+// 商品名部分（」の手前）だけを取り出し、先頭に紛れ込んだ誤読1文字を落とす。
+// ハイフンは商品名そのものの先頭（-196 など）でありうるので落とさない。
+const BROKEN_OPEN_BRACKET_CHARS = /^[0-9A-Za-z|｜[\]()（）_~^"'`､、。･]/;
+
+function recoverFromBrokenOpenBracket(t) {
+  const close = t.indexOf("」");
+  if (close < 0) return t;
+  const head = t.slice(0, close);
+  if (!head.trim()) return t;
+  return head.replace(BROKEN_OPEN_BRACKET_CHARS, "").trim();
+}
+
 // 行テキストを商品名として整える。「◯本と引き換え〜」などの定型の尻尾を落とし、
 // ノイズ行・数字だらけの行なら空文字を返す。
-function cleanProductLine(raw) {
+function cleanProductLine(raw, strict = true) {
   let t = tidySpacing(raw);
   const bracket = t.match(/「(.+?)」/);
   if (bracket) t = bracket[1];
+  else {
+    // 鉤括弧で区切られていない＝行まるごとを商品名として使う場合は、
+    // 定型の尻尾を落とす前にノイズ判定をしておく。
+    // 「※賞品の引換えはお一人様一回のみ」のような注意書きは、
+    // 尻尾（引換え以降）を落としたあとでは「賞品の」しか残らず、
+    // ノイズ語が消えてしまって商品名と誤認されるため。
+    if (NOISE_PATTERN.test(t)) return "";
+    t = recoverFromBrokenOpenBracket(t);
+  }
   // 「◯本と引き換え〜」「無料引き換えクーポン」「無料引換クーポン」「いずれか◯本と引き換え〜」
   // などの定型の尻尾を落とす。「いずれか」は商品名を含まずこの尻尾だけの行になっていることがあり、
   // 落とさずに残すと切り落とし後の残りカス（「いずれか」）が誤って商品名として採用されてしまう。
   t = t.replace(/(?:いずれか)?\s*(?:\d+\s*(?:本|個|つ|杯|枚|袋|缶))?\s*(?:コンビニ)?\s*(?:無料)?\s*と?\s*引き?換え?.*$/, "").trim();
   // 行の折り返しで「〜無料引き」までで途切れた尻尾も落とす
   t = t.replace(/(?:コンビニ)?\s*無料\s*引?き?$/, "").trim();
+  t = tidyBrackets(t);
   if (t.length < 3) return "";
   if (NOISE_PATTERN.test(t)) return "";
   const digitRatio = (t.match(/\d/g) || []).length / t.length;
   if (digitRatio >= 0.5) return "";
+  // 日本語がほとんど無い行は商品名ではない（缶のロゴ等の誤読）。
+  // ここで弾いておくと、同じ商品名がページ下部にもう一度書かれている場合に
+  // そちらを拾い直せる。
+  if (!hasEnoughNameChars(t, strict)) return "";
   return t;
 }
 
 // 定型文除去のあとに数字・単位語しか残らなかった行（「4)350ml缶」など）は、
 // 商品名がもっと上の別行に書かれていて、この行は末尾の断片に過ぎない可能性が高い。
 // そのため商品名の手がかりとしては採用しない。
-function hasEnoughNameChars(t) {
-  const core = t
-    .replace(/[\d０-９()（）\-‐—,，.。:：\s]/g, "")
-    .replace(/ml|ML|ｍｌ|缶|ボトル|パック|袋|カップ|杯|個|本/g, "");
-  return core.length >= 3;
+//
+// 判定は「単位語を除いた日本語が3文字以上あるか」で行う。
+// コンビニクーポンの商品名は必ず日本語を含むのに対し、缶のデザインやロゴを
+// 誤読した行は英数字と記号ばかりになる（実例: 「196(¥ 7ILL EV)5% 350ml缶」）。
+// 英字だけを数えると後者を弾けないため、日本語の文字数で見る。
+// strict=true: 日本語だけを数える（缶のロゴ誤読を弾くための厳しい判定）
+// strict=false: 従来どおり英字も数える（英字混じりの商品名を取りこぼさないための緩い判定）
+function hasEnoughNameChars(t, strict = true) {
+  const withoutUnits = t.replace(/ml|ML|ｍｌ|缶|ボトル|パック|袋|カップ|杯|個|本/g, "");
+  const keep = strict ? /[^ぁ-んァ-ヶ一-龠々]/g : /[^ぁ-んァ-ヶ一-龠々A-Za-zＡ-Ｚａ-ｚ]/g;
+  return withoutUnits.replace(keep, "").length >= 3;
 }
 
 // テキストが縦に大きく途切れている箇所＝商品画像などの領域とみなし、
@@ -321,14 +417,23 @@ function findLineBelowLargestGap(lines) {
   return null;
 }
 
+// 商品名の推定。まず厳しい判定（日本語必須・単位語必須）で探し、
+// それで見つからなければ従来どおりの緩い判定でもう一度探す。
+// **Why:** 厳しい判定だけにすると、これまで読めていた英字混じりの商品名などを
+// 取りこぼす恐れがある。緩い判定を後段に残しておけば、従来読めていたものは
+// これまでどおり読めたうえで、缶のロゴ誤読などは前段で先に弾ける。
 export function extractProductNameGuess(lines) {
+  return guessProductName(lines, true) || guessProductName(lines, false);
+}
+
+function guessProductName(lines, strict) {
   if (!lines || !lines.length) return "";
 
   // 0) 「（税込237円）」のような価格表記がある行は最有力の手がかりなので最優先で使う
   for (const { text } of lines) {
     const tidied = tidySpacing(text);
     if (PRICE_PATTERN.test(tidied)) {
-      const name = cleanProductLine(stripPrice(tidied));
+      const name = cleanProductLine(stripPrice(tidied), strict);
       if (name) return name;
     }
   }
@@ -337,15 +442,16 @@ export function extractProductNameGuess(lines) {
   //    テキストの大きな縦空白（＝画像領域）の直後の行を最優先で採用する
   const belowImage = findLineBelowLargestGap(lines);
   if (belowImage) {
-    const name = cleanProductLine(belowImage.text);
+    const name = cleanProductLine(belowImage.text, strict);
     if (name) return name;
   }
 
   // 2) 「商品名」の鉤括弧表記（コンビニクーポンの定番）
+  //    OCRの括弧の取り違えを揃えてから探す
   for (const { text } of lines) {
-    const m = text.match(/「(.+?)」/);
+    const m = tidySpacing(text).match(/「(.+?)」/);
     if (m) {
-      const name = cleanProductLine(m[1]);
+      const name = cleanProductLine(m[1], strict);
       if (name) return name;
     }
   }
@@ -355,8 +461,8 @@ export function extractProductNameGuess(lines) {
   for (let i = 0; i < lines.length; i++) {
     const tidied = tidySpacing(lines[i].text);
     if (!/引き?換え?/.test(tidied)) continue;
-    const name = cleanProductLine(tidied);
-    if (name && hasEnoughNameChars(name)) return name;
+    const name = cleanProductLine(tidied, strict);
+    if (name && hasEnoughNameChars(name, strict)) return name;
 
     // 長い商品名は「商品名／350ml缶／いずれか1本無料引換えクーポン」のように
     // 複数行に折り返されてOCRされることがあり、この行単体では断片しか残らない。
@@ -375,18 +481,18 @@ export function extractProductNameGuess(lines) {
       const gap = below.y - (prev.y1 || prev.y);
       if (gap > prevHeight * 1.8) break; // 行間が開きすぎ＝別ブロックなので連結しない
       joined = prevTidied + joined;
-      const joinedName = cleanProductLine(joined);
-      if (joinedName && hasEnoughNameChars(joinedName)) return joinedName;
+      const joinedName = cleanProductLine(joined, strict);
+      if (joinedName && hasEnoughNameChars(joinedName, strict)) return joinedName;
     }
   }
 
-  // 4) ノイズ行を除き、商品らしい語（ml/缶/本など）を含む行を優先、なければ一番上の行
-  const candidates = lines
-    .map(({ text }) => cleanProductLine(text))
-    .filter(Boolean)
-    .map((text) => ({ text }));
+  // 4) 最後の手段。商品らしい語（ml/缶/本など）を含む行を優先する。
+  //    厳しい判定のときはそこで打ち切り、緩い判定のときだけ従来どおり
+  //    「残った候補の1行目」まで拾う。前段で弾けなかったときの取りこぼし防止。
+  const candidates = lines.map(({ text }) => cleanProductLine(text, strict)).filter(Boolean);
   const productLike = candidates.find(
-    ({ text }) => /(ml|ML|ｍｌ|缶|ボトル|パック|袋|カップ|杯|個|本)/.test(text) && hasEnoughNameChars(text)
+    (text) => PRODUCT_UNIT_PATTERN.test(text) && hasEnoughNameChars(text, strict)
   );
-  return (productLike || candidates[0])?.text || "";
+  if (productLike) return productLike;
+  return strict ? "" : candidates[0] || "";
 }

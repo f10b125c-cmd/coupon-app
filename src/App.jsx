@@ -839,6 +839,52 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
     onClose();
   }
 
+  // クーポンを開いたまま、その1件を読み取り直す。
+  // 一覧の「読み取り直す」と同じ方針で、商品名だけは上書きし、
+  // 店舗・期限・バーコードは手で直している可能性があるので空のときだけ埋める。
+  async function rescanAndOverwrite() {
+    if (!coupon.imageDataUrl) return;
+    setScanning(true);
+    setScanMessage("バーコードを解析中…");
+    try {
+      let barcodeText = await scanBarcode(coupon.imageDataUrl);
+      setScanMessage("文字を認識中…（初回は時間がかかります）");
+      const { text, lines } = await scanText(coupon.imageDataUrl, (pct) =>
+        setScanMessage(`文字を認識中…${pct}%`)
+      );
+      if (!barcodeText) barcodeText = extractBarcodeNumberGuess(text);
+      const detectedStore = detectStoreFromBarcode(barcodeText);
+      const detectedDate = extractExpiryDate(text);
+      const detectedName = extractProductNameGuess(lines);
+
+      const next = {
+        ...coupon,
+        productName: detectedName || coupon.productName || "",
+        store: coupon.store || detectedStore || "",
+        expiresAt: coupon.expiresAt || detectedDate || "",
+        barcode:
+          coupon.barcode || (barcodeText && (normalizeBarcode(barcodeText) || barcodeText)) || "",
+        updatedAt: new Date().toISOString(),
+      };
+      onUpdate(next);
+      // 編集画面に切り替えたときに古い値が出ないよう、入力欄の状態も揃えておく
+      setProductName(next.productName);
+      setStore(next.store);
+      setExpiresAt(next.expiresAt);
+      setBarcode(next.barcode);
+      setScanMessage(
+        detectedName
+          ? `商品名を「${detectedName}」に更新しました。`
+          : "商品名を読み取れませんでした。鉛筆マークから手入力してください。"
+      );
+    } catch (e) {
+      console.error("[rescanAndOverwrite] 読み取りに失敗しました", e);
+      setScanMessage("読み取りに失敗しました。もう一度お試しください。");
+    } finally {
+      setScanning(false);
+    }
+  }
+
   function markUnused() {
     onUpdate({ ...coupon, status: "unused", usedAt: null, updatedAt: new Date().toISOString() });
   }
@@ -1120,6 +1166,46 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
         ) : (
           <>
             {coupon.imageDataUrl && (
+              <div style={{ marginBottom: 12 }}>
+                <button
+                  onClick={rescanAndOverwrite}
+                  disabled={scanning}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 6,
+                    width: "100%",
+                    padding: "11px 12px",
+                    borderRadius: 10,
+                    border: `1.5px solid ${COLORS.forest}`,
+                    background: scanning ? COLORS.line : COLORS.forestSoft,
+                    color: COLORS.forest,
+                    fontFamily: "'M PLUS Rounded 1c', sans-serif",
+                    fontWeight: 700,
+                    fontSize: 13,
+                    cursor: scanning ? "not-allowed" : "pointer",
+                  }}
+                >
+                  <ScanLine size={15} />
+                  {scanning ? "読み取り中…" : "読み取り直す"}
+                </button>
+                {scanMessage && (
+                  <div
+                    style={{
+                      marginTop: 6,
+                      fontFamily: "'M PLUS Rounded 1c', sans-serif",
+                      fontSize: 12,
+                      color: COLORS.muted,
+                    }}
+                  >
+                    {scanMessage}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {coupon.imageDataUrl && (
               <div style={{ position: "relative", marginBottom: 12 }}>
                 <img
                   src={coupon.imageDataUrl}
@@ -1365,11 +1451,37 @@ async function migrateLocalDataIfNeeded() {
   localStorage.setItem(MIGRATION_FLAG_KEY, "1");
 }
 
+// 画面を左から右にスワイプする（戻る操作）と、ホーム画面に追加したアプリでは
+// 確認なしでそのまま閉じてしまう。履歴にダミーの1件を積んでおき、
+// 戻る操作をここで受け止めて終了確認を出す。
+// このアプリは画面遷移を持たない1画面構成なので、戻る＝アプリを離れるとみなしてよい。
+// （PWAかどうかで出し分けると、判定が効かない端末で素通りしてしまうため常に有効にする）
+function useExitConfirm() {
+  useEffect(() => {
+    // 二重に積まないよう、目印つきの履歴が積まれていないときだけ積む
+    if (!window.history.state || !window.history.state.__exitGuard) {
+      window.history.pushState({ __exitGuard: true }, "");
+    }
+    function onPopState() {
+      if (window.confirm("クーポン管理を終了しますか？")) {
+        // ダミーを積み直さずにもう一段戻す＝アプリを離れる
+        window.history.back();
+      } else {
+        // 残るならダミー履歴を積み直して、次の戻る操作にも備える
+        window.history.pushState({ __exitGuard: true }, "");
+      }
+    }
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+}
+
 /* ---------------------------------------------------------
    メインアプリ
 --------------------------------------------------------- */
 export default function CouponApp() {
   useFonts();
+  useExitConfirm();
   const [coupons, setCoupons] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [tab, setTab] = useState("unused");
@@ -1611,6 +1723,56 @@ export default function CouponApp() {
           ? `、要確認のため未整理に残したもの: ${needsReview}件${dupCount ? `／うち重複の疑い: ${dupCount}件` : ""}`
           : "") +
         "）。"
+    );
+  }
+
+  // 選択したクーポンをまとめて読み取り直す。
+  // 商品名は読み取り精度の改善後に付け直したいケースが主なので、読み取れたら既存の値を上書きする。
+  // 店舗・期限・バーコードは手で直している可能性があるため、空のときだけ埋める。
+  async function bulkScanSelected() {
+    const targets = coupons.filter((c) => selectedIds.includes(c.id) && c.imageDataUrl);
+    if (!targets.length) {
+      notify("画像のあるクーポンを選んでください。");
+      return;
+    }
+
+    setBulkScanProgress({ done: 0, total: targets.length });
+    let nameCount = 0;
+
+    for (let i = 0; i < targets.length; i++) {
+      const c = targets[i];
+      try {
+        let barcodeText = await scanBarcode(c.imageDataUrl);
+        const { text, lines } = await scanText(c.imageDataUrl);
+        if (!barcodeText) barcodeText = extractBarcodeNumberGuess(text);
+        const detectedStore = detectStoreFromBarcode(barcodeText);
+        const detectedDate = extractExpiryDate(text);
+        const detectedName = extractProductNameGuess(lines);
+
+        if (detectedName) nameCount++;
+
+        await saveCouponToCloud({
+          ...c,
+          productName: detectedName || c.productName || "",
+          store: c.store || detectedStore || "",
+          expiresAt: c.expiresAt || detectedDate || "",
+          barcode: c.barcode || (barcodeText && (normalizeBarcode(barcodeText) || barcodeText)) || "",
+          updatedAt: new Date().toISOString(),
+        });
+      } catch (e) {
+        console.error("[bulkScanSelected] 読み取りに失敗しました", c.id, e);
+      }
+      setBulkScanProgress({ done: i + 1, total: targets.length });
+    }
+
+    setBulkScanProgress(null);
+    setSelectedIds([]);
+    // 読み取れなかったぶんは既存の商品名を残す仕様なので、
+    // 黙っていると「押したのに直らない」に見える。件数をはっきり伝える。
+    const failed = targets.length - nameCount;
+    notify(
+      `${targets.length}件を読み取り直しました（商品名を更新: ${nameCount}件）。` +
+        (failed ? `${failed}件は商品名を読み取れませんでした。開いて手入力してください。` : "")
     );
   }
 
@@ -2176,11 +2338,14 @@ export default function CouponApp() {
               color: COLORS.ink,
             }}
           >
-            {selectedIds.length}件選択中
+            {bulkScanProgress
+              ? `読み取り中…${bulkScanProgress.done}/${bulkScanProgress.total}`
+              : `${selectedIds.length}件選択中`}
           </span>
           <div style={{ display: "flex", gap: 8 }}>
             <button
               onClick={() => setSelectedIds([])}
+              disabled={!!bulkScanProgress}
               style={{
                 padding: "10px 14px",
                 borderRadius: 10,
@@ -2190,24 +2355,45 @@ export default function CouponApp() {
                 fontFamily: "'M PLUS Rounded 1c', sans-serif",
                 fontWeight: 700,
                 fontSize: 13,
-                cursor: "pointer",
+                cursor: bulkScanProgress ? "not-allowed" : "pointer",
               }}
             >
               キャンセル
             </button>
             <button
+              onClick={bulkScanSelected}
+              disabled={!!bulkScanProgress}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 5,
+                padding: "10px 14px",
+                borderRadius: 10,
+                border: `1.5px solid ${COLORS.forest}`,
+                background: bulkScanProgress ? COLORS.line : COLORS.forestSoft,
+                color: COLORS.forest,
+                fontFamily: "'M PLUS Rounded 1c', sans-serif",
+                fontWeight: 700,
+                fontSize: 13,
+                cursor: bulkScanProgress ? "not-allowed" : "pointer",
+              }}
+            >
+              <ScanLine size={14} />
+              読み取り直す
+            </button>
+            <button
               onClick={markSelectedAsUsed}
-              disabled={selectedIds.length === 0}
+              disabled={selectedIds.length === 0 || !!bulkScanProgress}
               style={{
                 padding: "10px 14px",
                 borderRadius: 10,
                 border: "none",
-                background: selectedIds.length ? COLORS.crimson : COLORS.line,
+                background: selectedIds.length && !bulkScanProgress ? COLORS.crimson : COLORS.line,
                 color: COLORS.paper,
                 fontFamily: "'M PLUS Rounded 1c', sans-serif",
                 fontWeight: 700,
                 fontSize: 13,
-                cursor: selectedIds.length ? "pointer" : "not-allowed",
+                cursor: selectedIds.length && !bulkScanProgress ? "pointer" : "not-allowed",
               }}
             >
               使用済みに

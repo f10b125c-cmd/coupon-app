@@ -44,6 +44,30 @@ function useFonts() {
   }, []);
 }
 
+// 画面下から出るシート（クーポンの詳細画面）の高さ。
+// スマホの vh はURLバーが引っ込んだ状態の高さを指すため、90vh だと
+// 実際に見えている範囲をはみ出し、シートの上端がURLバーの裏に隠れてしまう。
+// いま見えている高さを表す dvh を使い、未対応の端末には vh を残す。
+// 下端も、iPhoneのホームバーやブラウザの下部ツールバーに重ならないよう余白を足す。
+function useSheetStyles() {
+  useEffect(() => {
+    const style = document.createElement("style");
+    style.textContent = [
+      ".sheet {",
+      // 余白込みで高さを制限する。既定(content-box)だと上下パディングのぶん
+      // 指定より背が高くなり、画面上端との余裕がほとんど残らない。
+      "  box-sizing: border-box;",
+      "  max-height: 88vh;",
+      "  max-height: 88dvh;",
+      "  padding-bottom: 28px;",
+      "  padding-bottom: calc(28px + env(safe-area-inset-bottom));",
+      "}",
+    ].join("\n");
+    document.head.appendChild(style);
+    return () => document.head.removeChild(style);
+  }, []);
+}
+
 /* ---------------------------------------------------------
    デザイントークン
 --------------------------------------------------------- */
@@ -903,6 +927,7 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
       onClick={onClose}
     >
       <div
+        className="sheet"
         onClick={(e) => e.stopPropagation()}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
@@ -911,8 +936,11 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
           width: "100%",
           maxWidth: 480,
           borderRadius: "20px 20px 0 0",
-          padding: "20px 20px 28px",
-          maxHeight: "90vh",
+          // 高さ(max-height)と下の余白は .sheet 側で指定する。
+          // ここで padding や maxHeight を書くとインラインが勝ってしまうため書かない。
+          paddingTop: 20,
+          paddingLeft: 20,
+          paddingRight: 20,
           overflowY: "auto",
         }}
       >
@@ -1481,6 +1509,7 @@ function useExitConfirm() {
 --------------------------------------------------------- */
 export default function CouponApp() {
   useFonts();
+  useSheetStyles();
   useExitConfirm();
   const [coupons, setCoupons] = useState([]);
   const [loaded, setLoaded] = useState(false);

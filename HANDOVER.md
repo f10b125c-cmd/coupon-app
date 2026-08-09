@@ -1,5 +1,65 @@
 # 引き継ぎノート
 
+## 2026-08-10 LINE自動取り込みのセットアップ完了 ＋ 詳細シートの高さ修正
+
+### LINE取り込みが本番で動くようになった
+
+`api/line-webhook.js` は以前から実装済みだったが、環境変数が未設定で動いていなかった。今回セットアップを完了し、**家族LINEグループに画像を貼るとアプリの「未整理」に入るところまで確認済み**（ログ: `saved coupon line-626595117792231578`）。
+
+bot: 「とみ家クーポン」`@429btbpp`
+
+登録済みの環境変数（Vercel Production、いずれもSensitive）:
+`LINE_CHANNEL_SECRET` / `LINE_CHANNEL_ACCESS_TOKEN` / `LINE_TARGET_GROUP_ID` / `FIREBASE_SERVICE_ACCOUNT_B64`
+
+### セットアップで実際にハマった点
+
+1. **Messaging APIチャネルはLINE Developersから作れない**（仕様変更済み）。LINE公式アカウントマネージャーの「設定」→「Messaging API」→「Messaging APIを利用する」から作る。作るとLINE Developers側にチャネルが現れる。
+2. **チャネルシークレットとアクセストークンを取り違えやすい**。実際に逆に登録していて、症状が2段階で出た。
+   - シークレットが違う → Webhookの［検証］が **401**（署名検証で弾かれる）
+   - トークンが違う → 画像は届くが取得で **401**（`LINE content API failed: 401`）
+   - 見分け方: シークレット=**16進32文字**、アクセストークン=**170文字前後**、チャネルID=数字のみ
+3. **jwx / JWT / 鍵ペアの手順は不要**。あれはチャネルアクセストークン**v2.1**用。使うのは「長期」で、ボタン1つ・**有効期限なし**。「チャネル基本設定」タブの「アサーション署名キー」も同じくv2.1用なので触らない。
+4. **Vercelの環境変数はSensitive扱いで読み戻せない**。`vercel env pull` してもプレースホルダしか取れないので、値の検証は登録前にクリップボード側で行う。
+
+### 値を見ずに検証する手順（次回も使える）
+
+```bash
+# 形式チェック（値は表示しない）
+python3 -c "
+import subprocess,re
+s=subprocess.run(['pbpaste'],capture_output=True,text=True).stdout.strip()
+print(len(s), 'hex32' if re.fullmatch('[0-9a-f]{32}',s) else 'token' if len(s)>=100 else '?')"
+
+# クリップボードから直接登録（値は経由するだけで表示されない）
+pbpaste | tr -d '\n' | vercel env add LINE_CHANNEL_SECRET production
+```
+
+署名検証が通るかは、自分で署名を作って叩けば確認できる（LINE側の［検証］ボタンを押さなくてよい）。
+
+```bash
+python3 -c "
+import subprocess,hmac,hashlib,base64,urllib.request
+s=subprocess.run(['pbpaste'],capture_output=True,text=True).stdout.strip()
+b=b'{\"events\":[],\"destination\":\"Utest\"}'
+sig=base64.b64encode(hmac.new(s.encode(),b,hashlib.sha256).digest()).decode()
+r=urllib.request.Request('https://coupon-app-dusky.vercel.app/api/line-webhook',data=b,
+  headers={'Content-Type':'application/json','x-line-signature':sig},method='POST')
+print(urllib.request.urlopen(r).status)"
+```
+
+アクセストークンの有効性は `GET https://api.line.me/v2/bot/info` に Bearer で投げれば200が返る。
+
+### 詳細シートが画面上部でURLバーに隠れる問題（App.jsx `useSheetStyles`）
+
+原因は2つ重なっていた。
+
+1. `maxHeight: "90vh"` を使っていた。スマホの `vh` は**URLバーが引っ込んだ状態**の高さなので、実際の表示領域をはみ出してシート上端がURLバーの裏に入る。→ 現在の表示高さを表す **`dvh`** に変更（未対応端末向けに `vh` も残す）。
+2. `max-height` は既定(content-box)ではパディングを含まないため、上下48pxぶん指定より背が高くなっていた。→ **`box-sizing: border-box`** を指定。
+
+375×812で実測: シート上端 33px → **97px**。あわせて下端に `env(safe-area-inset-bottom)` を追加（ホームバー・下部ツールバー対策）。
+
+インラインstyleはクラスより強いので、`.sheet` 側で指定する `max-height` と `padding-bottom` を**インラインに書き戻さないこと**。
+
 ## 2026-07-29 商品名OCRの誤読対策 ＋ スワイプ終了確認 ＋ 選択して読み取り直す
 
 ### 背景（何が起きていたか）

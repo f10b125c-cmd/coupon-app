@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   detectStoreFromBarcode,
   extractBarcodeNumberGuess,
+  extractExpiryDate,
   extractProductNameGuess,
 } from "./scan.js";
 
@@ -65,4 +66,20 @@ test("ローソン券の空白区切り17桁バーコードを検出する", () 
     assert.equal(barcode.length, 17);
     assert.equal(detectStoreFromBarcode(barcode), "lawson");
   }
+});
+
+test("ローソン券の店舗利用期限をOCRの崩れから復元する", () => {
+  const ocrTexts = [
+    "店 贈 利 用 期限 2026708724 23:59 まで",
+    "| 店 鞭 判 用 其 昌 | 2026/0S/24 23:59 まで",
+    "店 舗 利用 誠 限 2026/08/24 23:59 まで",
+  ];
+
+  for (const text of ocrTexts) {
+    assert.equal(extractExpiryDate(text), "2026-08-24");
+  }
+});
+
+test("既存の日付パターンも従来どおり読む", () => {
+  assert.equal(extractExpiryDate("利用期間 2026/08/01〜2026/08/31"), "2026-08-31");
 });

@@ -223,11 +223,71 @@ const DATE_PATTERNS = [
   /(20\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])/g,
 ];
 
+function toValidIsoDate(year, month, day) {
+  const y = Number(year);
+  const m = Number(month);
+  const d = Number(day);
+  if (m < 1 || m > 12 || d < 1 || d > 31) return "";
+
+  const date = new Date(Date.UTC(y, m - 1, d));
+  if (
+    date.getUTCFullYear() !== y ||
+    date.getUTCMonth() !== m - 1 ||
+    date.getUTCDate() !== d
+  ) {
+    return "";
+  }
+  return `${year}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+// ローソン券面の「店舗利用期限 YYYY/MM/DD 23:59まで」は文字が小さく、
+// 実画像では「2026708724」「2026/0S/24」のようにスラッシュや8が崩れた。
+// 23:59までの直前だけを期限欄として扱い、既存の日付抽出とは独立して補正する。
+function extractStoreDeadlineDate(text) {
+  const normalized = normalizeDigits(text);
+  const deadlinePattern = /20\d{2}[^\r\n]{0,20}?(?=\s*23\s*[:：]\s*59\s*まで)/g;
+
+  for (const match of normalized.matchAll(deadlinePattern)) {
+    const raw = match[0]
+      .replace(/[Oo]/g, "0")
+      .replace(/[SsＢB]/g, "8")
+      .replace(/[Il|]/g, "1");
+    const yearMatch = raw.match(/20\d{2}/);
+    if (!yearMatch) continue;
+
+    const year = yearMatch[0];
+    const tail = raw.slice((yearMatch.index || 0) + year.length);
+    const separated = tail.match(
+      /^\s*[\/\-.年]\s*(\d{1,2})\s*[\/\-.月]\s*(\d{1,2})/
+    );
+    if (separated) {
+      const iso = toValidIsoDate(year, separated[1], separated[2]);
+      if (iso) return iso;
+    }
+
+    // スラッシュが数字として混入した場合は、末尾2桁を日として固定し、
+    // その直前側から成立する月を探す（708724 → 08/24）。
+    const digits = tail.replace(/\D/g, "");
+    if (digits.length < 4) continue;
+    const day = digits.slice(-2);
+    const beforeDay = digits.slice(0, -2);
+    for (let i = beforeDay.length - 2; i >= 0; i--) {
+      const month = beforeDay.slice(i, i + 2);
+      const iso = toValidIsoDate(year, month, day);
+      if (iso) return iso;
+    }
+  }
+  return "";
+}
+
 // クーポンは「利用期間 6/30〜7/13」のように開始日と終了日が並ぶため、
 // 見つかった日付の中で一番遅いものを有効期限として採用する。
 export function extractExpiryDate(text) {
   if (!text) return "";
   const normalized = normalizeDigits(text);
+  const storeDeadline = extractStoreDeadlineDate(normalized);
+  if (storeDeadline) return storeDeadline;
+
   let latest = "";
   for (const pattern of DATE_PATTERNS) {
     for (const m of normalized.matchAll(pattern)) {

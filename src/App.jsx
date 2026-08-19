@@ -1774,11 +1774,19 @@ export default function CouponApp() {
   }
 
   // 未整理のスクショ付きクーポンをまとめて自動読み取りする
-  // （autoScanned済み＝追加時に背景で解析済みのものは、クラウド保存用に圧縮された
-  //   画像しか残っておらずバーコードが読み取れなくなっていることが多いため対象外にする）
+  // 追加時に解析済みでも、商品名・店舗・期限・バーコードのいずれかが空なら
+  // 改善後のOCRで再解析する。すべて取得済みの券だけを対象外にする。
   async function bulkScanInbox() {
-    const targets = coupons.filter((c) => c.inbox && c.imageDataUrl && !c.autoScanned);
-    if (!targets.length) return;
+    const targets = coupons.filter(
+      (c) =>
+        c.inbox &&
+        c.imageDataUrl &&
+        (!c.autoScanned || !c.productName || !c.store || !c.expiresAt || !c.barcode)
+    );
+    if (!targets.length) {
+      notify("再読み取りが必要な未整理クーポンはありません。");
+      return;
+    }
 
     setBulkScanProgress({ done: 0, total: targets.length });
     let filledCount = 0;
@@ -1814,6 +1822,7 @@ export default function CouponApp() {
           expiresAt: c.expiresAt || detectedDate || "",
           productName: c.productName || detectedName || "",
           barcode: (barcodeText && (normalizeBarcode(barcodeText) || barcodeText)) || c.barcode || "",
+          autoScanned: true,
           inbox: canAutoRegister ? false : c.inbox,
           updatedAt: new Date().toISOString(),
         };
@@ -1928,13 +1937,18 @@ export default function CouponApp() {
     });
   }, [coupons]);
 
-  // LINE取り込みで届いた、まだ自動読み取りしていない未整理クーポンの数。
+  // LINE取り込みで届いた、未読取または読み取り項目が不足している未整理クーポンの数。
   // 手動追加分は追加時に背景で解析されるため対象外（解析中の数秒間バナーが
   // 点滅するのを避ける）。LINE経由の未読取分はこのバナーから読み取ってもらう。
   const pendingScanCount = useMemo(
     () =>
       coupons.filter(
-        (c) => c.source === "line" && c.inbox && c.imageDataUrl && !c.autoScanned && !isHiddenByAge(c)
+        (c) =>
+          c.source === "line" &&
+          c.inbox &&
+          c.imageDataUrl &&
+          (!c.autoScanned || !c.productName || !c.store || !c.expiresAt || !c.barcode) &&
+          !isHiddenByAge(c)
       ).length,
     [coupons]
   );

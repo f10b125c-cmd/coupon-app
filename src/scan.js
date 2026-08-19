@@ -123,16 +123,23 @@ function invertCanvas(canvas) {
 // 店舗利用期限は券面最下部に小さな赤文字で印字され、画像全体のOCRでは
 // 見出しだけ読めても日付数字が落ちることがある。下部だけを切り出して拡大し、
 // 期限専用の追加OCRに渡す。商品名用の行データには混ぜない。
-function makeDeadlineCrop(img) {
-  const sourceY = Math.floor(img.height * 0.65);
-  const sourceHeight = Math.max(1, img.height - sourceY);
-  const scale = Math.min(3, 2400 / img.width);
+function makeDeadlineCrop(
+  img,
+  highContrast = false,
+  startRatio = 0.65,
+  endRatio = 1,
+  redOnly = false
+) {
+  const sourceY = Math.floor(img.height * startRatio);
+  const sourceEnd = Math.min(img.height, Math.ceil(img.height * endRatio));
+  const sourceHeight = Math.max(1, sourceEnd - sourceY);
+  const scale = Math.min(4, 2800 / img.width);
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(img.width * scale));
   canvas.height = Math.max(1, Math.round(sourceHeight * scale));
   const ctx = canvas.getContext("2d");
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high";
+  // 小さい赤文字の輪郭を保つため、期限欄では補間を切って拡大する。
+  ctx.imageSmoothingEnabled = false;
   ctx.drawImage(
     img,
     0,
@@ -144,7 +151,75 @@ function makeDeadlineCrop(img) {
     canvas.width,
     canvas.height
   );
+
+  if (highContrast) {
+    // ローソン券の期限は薄い赤で、通常OCRでは背景と同化しやすい。
+    // 赤文字を含む暗い画素を黒、背景を白へ二値化して数字の輪郭を強調する。
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const pixels = imageData.data;
+    for (let i = 0; i < pixels.length; i += 4) {
+      const luminance =
+        pixels[i] * 0.299 + pixels[i + 1] * 0.587 + pixels[i + 2] * 0.114;
+      const isDeadlineRed =
+        pixels[i] > 100 &&
+        pixels[i] > pixels[i + 1] * 1.2 &&
+        pixels[i] > pixels[i + 2] * 1.06;
+      const value = redOnly
+        ? isDeadlineRed
+          ? 0
+          : 255
+        : luminance < 210
+          ? 0
+          : 255;
+      pixels[i] = value;
+      pixels[i + 1] = value;
+      pixels[i + 2] = value;
+      pixels[i + 3] = 255;
+    }
+    ctx.putImageData(imageData, 0, 0);
+  }
   return canvas.toDataURL("image/png");
+}
+
+// 期限日付は券面下部の赤い1行。画像の縦横比や余白が券ごとに違うため、
+// 固定座標ではなく赤画素の最下段グループを探して切り出し位置を決める。
+function findDeadlineRedBand(img) {
+  const scale = Math.min(1, 800 / img.width);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(img.width * scale));
+  canvas.height = Math.max(1, Math.round(img.height * scale));
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+  const rows = [];
+  const minRedPixels = Math.max(6, Math.round(canvas.width * 0.015));
+
+  for (let y = Math.floor(canvas.height * 0.75); y < canvas.height; y++) {
+    let count = 0;
+    for (let x = 0; x < canvas.width; x++) {
+      const i = (y * canvas.width + x) * 4;
+      const r = pixels[i];
+      const g = pixels[i + 1];
+      const b = pixels[i + 2];
+      if (r > 100 && r > g * 1.2 && r > b * 1.06) count++;
+    }
+    if (count >= minRedPixels) rows.push(y);
+  }
+
+  if (!rows.length) return [0.86, 0.98];
+  let end = rows[rows.length - 1];
+  let start = end;
+  for (let i = rows.length - 2; i >= 0; i--) {
+    if (start - rows[i] > 4) break;
+    start = rows[i];
+  }
+  if (end - start < 2) return [0.86, 0.98];
+
+  const padding = Math.max(8, Math.round(canvas.height * 0.018));
+  return [
+    Math.max(0.72, (start - padding) / canvas.height),
+    Math.min(1, (end + padding) / canvas.height),
+  ];
 }
 
 function extractLines(data) {
@@ -185,7 +260,7 @@ function mergeLines(base, extra) {
 export async function scanText(imageDataUrl, onProgress) {
   let normalTarget = imageDataUrl;
   let invertedTarget = null;
-  let deadlineTarget = null;
+  let deadlineTargets = [];
   try {
     const img = await loadImage(imageDataUrl);
     const canvas = toBoundedCanvas(img, 2000);
@@ -194,7 +269,14 @@ export async function scanText(imageDataUrl, onProgress) {
     // 同じ画像でも端末によってOCR結果が変わってしまう。可逆なPNGにして差をなくす。
     normalTarget = canvas.toDataURL("image/png");
     invertedTarget = invertCanvas(canvas).toDataURL("image/png");
-    deadlineTarget = makeDeadlineCrop(img);
+    const [deadlineStart, deadlineEnd] = findDeadlineRedBand(img);
+    deadlineTargets = [
+      makeDeadlineCrop(img),
+      makeDeadlineCrop(img, true),
+      // 実画像では期限の赤文字が高さの約92〜94%にある。バーコードを除外し、
+      // この1行だけを読む候補も用意して数字列へOCRを集中させる。
+      makeDeadlineCrop(img, true, deadlineStart, deadlineEnd, true),
+    ];
   } catch (e) {
     // 縮小に失敗しても元画像でOCRを続行する（反転パスはスキップ）
   }
@@ -238,20 +320,31 @@ export async function scanText(imageDataUrl, onProgress) {
     const fullText = lines.map((l) => l.text).join("\n");
     let deadlineText = "";
     // 全体OCRですでに期限を取得できた画像は追加処理を省き、モバイルの負荷を抑える。
-    if (deadlineTarget && !extractExpiryDate(fullText)) {
-      try {
-        const { data: deadlineData } = await withTimeout(
-          worker.recognize(
-            deadlineTarget,
-            { tessedit_pageseg_mode: PSM.SINGLE_BLOCK },
-            { text: true }
-          ),
-          45000,
-          "店舗利用期限の文字認識"
-        );
-        deadlineText = (deadlineData.text || "").trim();
-      } catch (e) {
-        // 期限専用パスの失敗は無視し、全体OCRの結果だけで続行する
+    if (deadlineTargets.length && !extractExpiryDate(fullText)) {
+      for (let index = 0; index < deadlineTargets.length; index++) {
+        try {
+          const highContrast = index >= 1;
+          const { data: deadlineData } = await withTimeout(
+            worker.recognize(
+              deadlineTargets[index],
+              highContrast
+                ? {
+                    tessedit_pageseg_mode:
+                      index === 2 ? PSM.SINGLE_LINE : PSM.SPARSE_TEXT,
+                    tessedit_char_whitelist: "0123456789/:.-",
+                  }
+                : { tessedit_pageseg_mode: PSM.SINGLE_BLOCK },
+              { text: true }
+            ),
+            45000,
+            "店舗利用期限の文字認識"
+          );
+          const candidate = (deadlineData.text || "").trim();
+          deadlineText = [deadlineText, candidate].filter(Boolean).join("\n");
+          if (extractExpiryDate(deadlineText)) break;
+        } catch (e) {
+          // この期限専用パスの失敗は無視し、次の候補へ進む
+        }
       }
     }
 
@@ -305,11 +398,12 @@ function normalizeDeadlineYear(year) {
 
 // ローソン券面の「店舗利用期限 YYYY/MM/DD 23:59まで」は文字が小さく、
 // 実画像では「2026708724」「2026/0S/24」のようにスラッシュや8が崩れた。
-// 23:59までの直前だけを期限欄として扱い、既存の日付抽出とは独立して補正する。
+// 23:59の直前だけを期限欄として扱い、既存の日付抽出とは独立して補正する。
+// 「まで」が別の文字へ崩れても、時刻が読めていれば期限として復元する。
 function extractStoreDeadlineDate(text) {
   const normalized = normalizeDigits(text);
   const deadlinePattern =
-    /20\d{2}[^\r\n]{0,20}?(?=\s*23\s*[:：]?\s*5?59\s*ま\s*で)/g;
+    /20\d{2}[^\r\n]{0,24}?(?=\s*23\s*[:：]?\s*5?59(?:\s*ま\s*で)?)/g;
 
   for (const match of normalized.matchAll(deadlinePattern)) {
     const raw = match[0]

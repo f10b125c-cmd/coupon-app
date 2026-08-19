@@ -126,6 +126,15 @@ Nodeだけでなく、アプリと同じCanvas/Tesseract経路で確認するこ
 - `.gitignore` は `.env*`、サービスアカウントJSON、Vercel情報を除外している
 - Firestoreを直接調査する場合も、ユーザーの明示許可なしに保存値を変更しない
 
+### GitHub PAT
+
+- HTTPS認証はmacOSの `osxkeychain` credential helperを使用する
+- 現在のPATは2026年9月18日までの有効期限で発行されている
+- 2026年9月18日以降にpushが認証エラーになった場合は、PAT期限切れを最初に確認する
+- 必要ならGitHubでPATを再発行し、macOSキーチェーンのGitHub認証情報を更新する
+- PATの値そのものは、文書・`.env`・コミット・チャットへ記録しない
+- 認証確認は `GIT_TERMINAL_PROMPT=0 git ls-remote origin HEAD` で安全に行える
+
 ## 完了前チェック
 
 1. `npm test`
@@ -134,4 +143,3 @@ Nodeだけでなく、アプリと同じCanvas/Tesseract経路で確認するこ
 4. 必要に応じて実ブラウザ・実画像でOCR確認
 5. コミット、`main`へpush、本番デプロイ
 6. 本番HTMLが新しいハッシュ付きJavaScriptを参照していることを確認
-

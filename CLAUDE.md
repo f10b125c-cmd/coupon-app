@@ -10,7 +10,7 @@
 - Tesseract.js（`jpn+eng`）で商品名・期限をOCR
 - ZXingでバーコードを検出し、OCRした印字数字もフォールバックに使用
 - 本番: https://coupon-app-dusky.vercel.app
-- ヘッダーの家族ポータル: https://tomifufu-official.netlify.app
+- ヘッダーの家族ポータル: https://tomifufu-family-home.aorin2025.chatgpt.site
 - GitHub: https://github.com/f10b125c-cmd/coupon-app.git
 - 本番ブランチ: `main`
 

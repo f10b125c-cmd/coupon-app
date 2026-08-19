@@ -98,7 +98,7 @@ const STORAGE_KEY = "coupons:list";
 const BUILD_DATE = typeof __BUILD_DATE__ !== "undefined" ? __BUILD_DATE__ : "";
 
 // クーポン管理から家族向けサイトへすぐ戻れるよう、ヘッダーに固定リンクを置く。
-const FAMILY_PORTAL_URL = "https://tomifufu-official.netlify.app";
+const FAMILY_PORTAL_URL = "https://tomifufu-family-home.aorin2025.chatgpt.site";
 
 // 期限切れ・使用済みは HIDE_AFTER_DAYS 日で一覧から非表示にし、
 // DELETE_AFTER_DAYS 日まではクラウドに残す（誤操作からの復元猶予。

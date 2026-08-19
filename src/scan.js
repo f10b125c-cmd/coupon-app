@@ -247,15 +247,123 @@ export function extractExpiryDate(text) {
 // 連続した数字のどちらにも対応できるよう、数字とハイフンの並びの中から一番長いものを採用する。
 const BARCODE_NUMBER_PATTERN = /\d[\d\-]{7,30}\d/g;
 
+// ローソンのお持ち帰り限定券では、バーコード下の17桁が
+// 「8222 0052 4251 5844 4」のように4桁ずつ空白で区切られて印字される。
+// 従来の連続数字・ハイフン区切りパターンはそのまま残し、専用パターンを追加する。
+const LAWSON_GROUPED_BARCODE_PATTERN = /\b\d{4}(?:[ \t]+\d{4}){3}[ \t]+\d\b/g;
+
+function extractLawsonGroupedBarcodeGuess(text) {
+  for (const line of text.split(/\r?\n/)) {
+    const chunks = line.trim().split(/\s+/);
+    for (let i = 0; i <= chunks.length - 5; i++) {
+      const groups = chunks
+        .slice(i, i + 5)
+        .map((chunk) => chunk.replace(/\D/g, ""));
+      if (
+        groups[0].length !== 4 ||
+        groups[4].length !== 1 ||
+        groups.slice(1, 4).some((group) => group.length < 3 || group.length > 4)
+      ) {
+        continue;
+      }
+
+      // OCRが各4桁グループ先頭の0を I / D 等と読むと、数字だけでは3桁になる。
+      // ローソン券面の固定レイアウトに限り、先頭0を補って17桁へ戻す。
+      const digits =
+        groups[0] +
+        groups
+          .slice(1, 4)
+          .map((group) => group.padStart(4, "0"))
+          .join("") +
+        groups[4];
+      if (digits.length === 17) return digits;
+    }
+  }
+  return "";
+}
+
 export function extractBarcodeNumberGuess(text) {
   if (!text) return "";
   const normalized = normalizeDigits(text);
+
+  for (const m of normalized.matchAll(LAWSON_GROUPED_BARCODE_PATTERN)) {
+    const digits = m[0].replace(/\D/g, "");
+    if (digits.length === 17) return digits;
+  }
+
+  const groupedLawsonGuess = extractLawsonGroupedBarcodeGuess(normalized);
+  if (groupedLawsonGuess) return groupedLawsonGuess;
+
   let best = "";
   for (const m of normalized.matchAll(BARCODE_NUMBER_PATTERN)) {
     const digits = m[0].replace(/\D/g, "");
     if (digits.length >= 8 && digits.length > best.length) best = digits;
   }
   return best;
+}
+
+// ローソンのお持ち帰り限定券面パターン:
+// 「【お持ち帰り限定】商品名（税込xxx円）無料引換券」が商品画像の上に置かれる。
+// 商品名が複数行に折り返される場合もあるため、価格・引換券表記までの近接行を連結する。
+// 既存の画像直下・鉤括弧・引換え行パターンには手を加えず、独立した抽出ルールとして扱う。
+// 実画像では「お 持ち 帰り 具 定」「お 持ち 需 り 骨 定」と読まれたため、
+// この券面の見出しに限って、文字間空白と字形の近い誤読を許容する。
+const LAWSON_TAKEOUT_MARKER_PATTERN = /お\s*持ち\s*[帰需]\s*り\s*[限具骨]\s*定/;
+const LAWSON_TAKEOUT_PREFIX_PATTERN =
+  /^.*?お\s*持ち\s*[帰需]\s*り\s*[限具骨]\s*定\s*[】\]」』〉>）)]*/;
+const LAWSON_TAKEOUT_END_PATTERN =
+  /[（(]\s*税込\s*[\d０-９,，]+\s*円\s*[）)].*$|(?:無料\s*)?引き?換え?券.*$/;
+const LAWSON_TAKEOUT_PRICE_PATTERN =
+  /[（(]\s*税込\s*([\d０-９,，]+)\s*円\s*[）)]/;
+const LAWSON_TAKEOUT_NAME_PATTERNS = [
+  [/^クーリッシュバニラ$/, "クーリッシュ バニラ"],
+  [/^アイスの実ぶどうマスカット$/, "アイスの実 ぶどうマスカット"],
+  [/^チョコモナカジャン[ボポ]$/, "チョコモナカジャンボ"],
+];
+
+function normalizeLawsonTakeoutName(raw) {
+  // この券面では日本語1語の途中にもOCR由来の空白が大量に入ることがあるため、
+  // 既存ルールと同じ文字間整理を、このパターン内だけで適用する。
+  const compact = tidySpacing(raw);
+  const known = LAWSON_TAKEOUT_NAME_PATTERNS.find(([pattern]) => pattern.test(compact));
+  return known ? known[1] : compact;
+}
+
+function extractLawsonTakeoutHeader(lines, strict) {
+  const markerIndex = lines.findIndex(({ text }) =>
+    LAWSON_TAKEOUT_MARKER_PATTERN.test(normalizeBrackets(text || ""))
+  );
+  if (markerIndex < 0) return "";
+
+  const parts = [];
+  for (let i = markerIndex; i < lines.length && i <= markerIndex + 3; i++) {
+    const current = lines[i];
+    if (i > markerIndex) {
+      const previous = lines[i - 1];
+      const previousHeight = Math.max((previous.y1 || previous.y) - previous.y, 1);
+      const gap = current.y - (previous.y1 || previous.y);
+      if (gap > previousHeight * 2.2) break;
+    }
+
+    parts.push(normalizeBrackets(current.text || ""));
+    if (PRICE_PATTERN.test(current.text || "") || /引き?換え?券/.test(current.text || "")) break;
+  }
+
+  // 行は区切りなしで連結する。これにより「マスカ」+「ット」のような
+  // 行末で分割された語を復元しつつ、同じ行に元からある商品名内の空白は維持できる。
+  const joined = parts.join("");
+  const priceMatch = normalizeDigits(joined).match(LAWSON_TAKEOUT_PRICE_PATTERN);
+  const price = priceMatch ? priceMatch[1].replace(/[,，]/g, "") : "";
+  let name = joined;
+  name = name.replace(LAWSON_TAKEOUT_PREFIX_PATTERN, "");
+  name = name.replace(LAWSON_TAKEOUT_END_PATTERN, "");
+  name = name.replace(/^[\s【\[「『〈<】\]」』〉>）)]+/, "");
+  name = normalizeLawsonTakeoutName(name.replace(/\s+/g, " ").trim());
+
+  if (name.length < 3 || NOISE_PATTERN.test(name)) return "";
+  const digitRatio = (name.match(/\d/g) || []).length / name.length;
+  if (digitRatio >= 0.5 || !hasEnoughNameChars(name, strict)) return "";
+  return `【お持ち帰り限定】 ${name}${price ? `(税込${price}円)` : ""}`;
 }
 
 // OCRは似た字形の括弧をよく取り違える（「→『、〈→《 など）。
@@ -428,6 +536,10 @@ export function extractProductNameGuess(lines) {
 
 function guessProductName(lines, strict) {
   if (!lines || !lines.length) return "";
+
+  // ローソン「お持ち帰り限定」券面は商品画像の上に商品名がある。
+  const lawsonTakeoutName = extractLawsonTakeoutHeader(lines, strict);
+  if (lawsonTakeoutName) return lawsonTakeoutName;
 
   // 0) 「（税込237円）」のような価格表記がある行は最有力の手がかりなので最優先で使う
   for (const { text } of lines) {

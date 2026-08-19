@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import {
   Link as LinkIcon,
   Image as ImageIcon,
@@ -320,6 +320,99 @@ function StoreChips({ value, onChange }) {
 /* ---------------------------------------------------------
    チケット半券カード（署名要素）
 --------------------------------------------------------- */
+function AutoFitCouponName({ children }) {
+  const ref = useRef(null);
+  const text = String(children || "");
+
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return undefined;
+
+    const maxFontSize = 17;
+    const minFontSize = 11;
+    let frame = 0;
+    let disposed = false;
+
+    const fit = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (disposed || !element.clientWidth) return;
+
+        element.style.fontSize = `${maxFontSize}px`;
+        element.style.whiteSpace = "nowrap";
+        element.style.overflowWrap = "normal";
+        element.style.overflow = "visible";
+
+        if (element.scrollWidth <= element.clientWidth + 1) return;
+
+        let low = minFontSize;
+        let high = maxFontSize;
+        let best = minFontSize;
+        for (let i = 0; i < 8; i++) {
+          const middle = (low + high) / 2;
+          element.style.fontSize = `${middle}px`;
+          if (element.scrollWidth <= element.clientWidth + 1) {
+            best = middle;
+            low = middle;
+          } else {
+            high = middle;
+          }
+        }
+        element.style.fontSize = `${best}px`;
+
+        // 11pxまで縮めても収まらない長い名前は、読める大きさを保って折り返す。
+        // 省略記号には戻さないため、商品名の末尾まで必ず確認できる。
+        if (element.scrollWidth > element.clientWidth + 1) {
+          element.style.whiteSpace = "normal";
+          element.style.overflowWrap = "anywhere";
+        }
+      });
+    };
+
+    fit();
+    let lastWidth = element.clientWidth;
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(([entry]) => {
+            const width = entry?.contentRect?.width || 0;
+            if (Math.abs(width - lastWidth) > 0.5) {
+              lastWidth = width;
+              fit();
+            }
+          });
+    observer?.observe(element);
+    window.addEventListener("resize", fit);
+    document.fonts?.ready?.then(fit);
+
+    return () => {
+      disposed = true;
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+      window.removeEventListener("resize", fit);
+    };
+  }, [text]);
+
+  return (
+    <div
+      ref={ref}
+      title={text}
+      style={{
+        width: "100%",
+        fontFamily: "'Zen Maru Gothic', sans-serif",
+        fontWeight: 700,
+        fontSize: 17,
+        lineHeight: 1.25,
+        color: COLORS.ink,
+        whiteSpace: "nowrap",
+        overflow: "hidden",
+      }}
+    >
+      {text}
+    </div>
+  );
+}
+
 function TicketCard({ coupon, onOpen, selected, onToggleSelect }) {
   const status = computeStatus(coupon);
   const d = daysUntil(coupon.expiresAt);
@@ -413,19 +506,7 @@ function TicketCard({ coupon, onOpen, selected, onToggleSelect }) {
           </div>
           <StampBadge status={status} />
         </div>
-        <div
-          style={{
-            fontFamily: "'Zen Maru Gothic', sans-serif",
-            fontWeight: 700,
-            fontSize: 17,
-            color: COLORS.ink,
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-          }}
-        >
-          {displayName(coupon)}
-        </div>
+        <AutoFitCouponName>{displayName(coupon)}</AutoFitCouponName>
         <div
           style={{
             display: "flex",

@@ -120,6 +120,33 @@ function invertCanvas(canvas) {
   return inv;
 }
 
+// 店舗利用期限は券面最下部に小さな赤文字で印字され、画像全体のOCRでは
+// 見出しだけ読めても日付数字が落ちることがある。下部だけを切り出して拡大し、
+// 期限専用の追加OCRに渡す。商品名用の行データには混ぜない。
+function makeDeadlineCrop(img) {
+  const sourceY = Math.floor(img.height * 0.65);
+  const sourceHeight = Math.max(1, img.height - sourceY);
+  const scale = Math.min(3, 2400 / img.width);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(img.width * scale));
+  canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+  const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(
+    img,
+    0,
+    sourceY,
+    img.width,
+    sourceHeight,
+    0,
+    0,
+    canvas.width,
+    canvas.height
+  );
+  return canvas.toDataURL("image/png");
+}
+
 function extractLines(data) {
   const lines = [];
   for (const block of data.blocks || []) {
@@ -158,6 +185,7 @@ function mergeLines(base, extra) {
 export async function scanText(imageDataUrl, onProgress) {
   let normalTarget = imageDataUrl;
   let invertedTarget = null;
+  let deadlineTarget = null;
   try {
     const img = await loadImage(imageDataUrl);
     const canvas = toBoundedCanvas(img, 2000);
@@ -166,11 +194,12 @@ export async function scanText(imageDataUrl, onProgress) {
     // 同じ画像でも端末によってOCR結果が変わってしまう。可逆なPNGにして差をなくす。
     normalTarget = canvas.toDataURL("image/png");
     invertedTarget = invertCanvas(canvas).toDataURL("image/png");
+    deadlineTarget = makeDeadlineCrop(img);
   } catch (e) {
     // 縮小に失敗しても元画像でOCRを続行する（反転パスはスキップ）
   }
 
-  const { createWorker } = await import("tesseract.js");
+  const { createWorker, PSM } = await import("tesseract.js");
   const worker = await withTimeout(
     createWorker("jpn+eng", 1, {
       logger: (m) => {
@@ -206,7 +235,30 @@ export async function scanText(imageDataUrl, onProgress) {
     }
 
     lines.sort((a, b) => a.y - b.y);
-    return { text: lines.map((l) => l.text).join("\n"), lines };
+    const fullText = lines.map((l) => l.text).join("\n");
+    let deadlineText = "";
+    // 全体OCRですでに期限を取得できた画像は追加処理を省き、モバイルの負荷を抑える。
+    if (deadlineTarget && !extractExpiryDate(fullText)) {
+      try {
+        const { data: deadlineData } = await withTimeout(
+          worker.recognize(
+            deadlineTarget,
+            { tessedit_pageseg_mode: PSM.SINGLE_BLOCK },
+            { text: true }
+          ),
+          45000,
+          "店舗利用期限の文字認識"
+        );
+        deadlineText = (deadlineData.text || "").trim();
+      } catch (e) {
+        // 期限専用パスの失敗は無視し、全体OCRの結果だけで続行する
+      }
+    }
+
+    return {
+      text: [fullText, deadlineText].filter(Boolean).join("\n"),
+      lines,
+    };
   } finally {
     await worker.terminate();
   }

@@ -10,6 +10,7 @@
 - Tesseract.js（`jpn+eng`）で商品名・期限をOCR
 - ZXingでバーコードを検出し、OCRした印字数字もフォールバックに使用
 - 本番: https://coupon-app-dusky.vercel.app
+- ヘッダーの家族ポータル: https://tomifufu-official.netlify.app
 - GitHub: https://github.com/f10b125c-cmd/coupon-app.git
 - 本番ブランチ: `main`
 
@@ -19,6 +20,9 @@
 - `src/scan.js`: OCR、期限・商品名・バーコード・店舗の抽出
 - `src/scan.test.js`: 抽出ロジックの回帰テスト
 - `src/firebase.js`: Firebaseクライアント初期化
+
+ヘッダーの家族ポータルリンクは別タブで開く。
+幅359px以下ではラベルを隠してアイコンだけにし、更新ボタンとの横並びを維持する。
 
 ## 開発・確認・公開
 

@@ -62,6 +62,10 @@ function useSheetStyles() {
       "  padding-bottom: 28px;",
       "  padding-bottom: calc(28px + env(safe-area-inset-bottom));",
       "}",
+      "@media (max-width: 359px) {",
+      "  .family-portal-link { width: 40px; padding: 0 !important; }",
+      "  .family-portal-label { display: none; }",
+      "}",
     ].join("\n");
     document.head.appendChild(style);
     return () => document.head.removeChild(style);
@@ -92,6 +96,9 @@ const STORAGE_KEY = "coupons:list";
 // ビルド時にvite.config.jsのdefineで注入される「アプリの更新日」。
 // 家族の端末で表示中のアプリが最新版かどうかをヘッダーで確認できるようにする。
 const BUILD_DATE = typeof __BUILD_DATE__ !== "undefined" ? __BUILD_DATE__ : "";
+
+// クーポン管理から家族向けサイトへすぐ戻れるよう、ヘッダーに固定リンクを置く。
+const FAMILY_PORTAL_URL = "https://tomifufu-official.netlify.app";
 
 // 期限切れ・使用済みは HIDE_AFTER_DAYS 日で一覧から非表示にし、
 // DELETE_AFTER_DAYS 日まではクラウドに残す（誤操作からの復元猶予。
@@ -2020,8 +2027,8 @@ export default function CouponApp() {
       }}
     >
       {/* ヘッダー */}
-      <header style={{ padding: "22px 18px 14px", display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
-        <div>
+      <header style={{ padding: "22px 18px 14px", display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 10 }}>
+        <div style={{ minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
             <Ticket size={20} color={COLORS.forest} />
             <span style={{ fontFamily: "'M PLUS Rounded 1c', sans-serif", fontSize: 11, color: COLORS.muted, letterSpacing: "0.1em" }}>
@@ -2043,7 +2050,35 @@ export default function CouponApp() {
             クーポン管理
           </h1>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+          <a
+            className="family-portal-link"
+            href={FAMILY_PORTAL_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="家族ポータルを開く"
+            style={{
+              height: 40,
+              boxSizing: "border-box",
+              padding: "0 10px",
+              borderRadius: 12,
+              border: `1.5px solid ${COLORS.line}`,
+              background: "#FFF9F6",
+              color: COLORS.ink,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 5,
+              textDecoration: "none",
+              whiteSpace: "nowrap",
+              fontFamily: "'M PLUS Rounded 1c', sans-serif",
+              fontWeight: 700,
+              fontSize: 11,
+            }}
+          >
+            <ExternalLink size={15} color={COLORS.forest} />
+            <span className="family-portal-label">家族ポータル</span>
+          </a>
           <button
             onClick={() => window.location.reload()}
             aria-label="データを更新"

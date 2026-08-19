@@ -292,12 +292,24 @@ function toValidIsoDate(year, month, day) {
   return `${year}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 }
 
+function normalizeDeadlineYear(year) {
+  const parsed = Number(year);
+  const currentYear = new Date().getFullYear();
+  // コンビニクーポンが数十年先まで有効になることはない。期限欄に限定し、
+  // 2026を2075と読むような大幅な誤読は現在年へ戻す。
+  if (parsed < currentYear - 1 || parsed > currentYear + 2) {
+    return String(currentYear);
+  }
+  return year;
+}
+
 // ローソン券面の「店舗利用期限 YYYY/MM/DD 23:59まで」は文字が小さく、
 // 実画像では「2026708724」「2026/0S/24」のようにスラッシュや8が崩れた。
 // 23:59までの直前だけを期限欄として扱い、既存の日付抽出とは独立して補正する。
 function extractStoreDeadlineDate(text) {
   const normalized = normalizeDigits(text);
-  const deadlinePattern = /20\d{2}[^\r\n]{0,20}?(?=\s*23\s*[:：]\s*59\s*まで)/g;
+  const deadlinePattern =
+    /20\d{2}[^\r\n]{0,20}?(?=\s*23\s*[:：]?\s*5?59\s*ま\s*で)/g;
 
   for (const match of normalized.matchAll(deadlinePattern)) {
     const raw = match[0]
@@ -307,7 +319,7 @@ function extractStoreDeadlineDate(text) {
     const yearMatch = raw.match(/20\d{2}/);
     if (!yearMatch) continue;
 
-    const year = yearMatch[0];
+    const year = normalizeDeadlineYear(yearMatch[0]);
     const tail = raw.slice((yearMatch.index || 0) + year.length);
     const separated = tail.match(
       /^\s*[\/\-.年]\s*(\d{1,2})\s*[\/\-.月]\s*(\d{1,2})/

@@ -839,7 +839,7 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
         setScanMessage(`文字を認識中…${pct}%`)
       );
       detectedDate = extractExpiryDate(text);
-      if (detectedDate && !expiresAt) setExpiresAt(detectedDate);
+      if (detectedDate) setExpiresAt(detectedDate);
       detectedName = extractProductNameGuess(lines);
       if (detectedName && !productName) setProductName(detectedName);
 
@@ -945,8 +945,8 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
   }
 
   // クーポンを開いたまま、その1件を読み取り直す。
-  // 一覧の「読み取り直す」と同じ方針で、商品名だけは上書きし、
-  // 店舗・期限・バーコードは手で直している可能性があるので空のときだけ埋める。
+  // 一覧の「読み取り直す」と同じ方針で、商品名と期限は再読結果で上書きする。
+  // 店舗・バーコードは手で直している可能性があるので空のときだけ埋める。
   async function rescanAndOverwrite() {
     if (!coupon.imageDataUrl) return;
     setScanning(true);
@@ -966,7 +966,7 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
         ...coupon,
         productName: detectedName || coupon.productName || "",
         store: coupon.store || detectedStore || "",
-        expiresAt: coupon.expiresAt || detectedDate || "",
+        expiresAt: detectedDate || coupon.expiresAt || "",
         barcode:
           coupon.barcode || (barcodeText && (normalizeBarcode(barcodeText) || barcodeText)) || "",
         updatedAt: new Date().toISOString(),
@@ -977,10 +977,14 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
       setStore(next.store);
       setExpiresAt(next.expiresAt);
       setBarcode(next.barcode);
+      const updatedFields = [
+        detectedName && `商品名を「${detectedName}」`,
+        detectedDate && `期限を「${detectedDate}」`,
+      ].filter(Boolean);
       setScanMessage(
-        detectedName
-          ? `商品名を「${detectedName}」に更新しました。`
-          : "商品名を読み取れませんでした。鉛筆マークから手入力してください。"
+        updatedFields.length
+          ? `${updatedFields.join("、")}に更新しました。`
+          : "商品名と期限を読み取れませんでした。鉛筆マークから手入力してください。"
       );
     } catch (e) {
       console.error("[rescanAndOverwrite] 読み取りに失敗しました", e);
@@ -1846,8 +1850,8 @@ export default function CouponApp() {
   }
 
   // 選択したクーポンをまとめて読み取り直す。
-  // 商品名は読み取り精度の改善後に付け直したいケースが主なので、読み取れたら既存の値を上書きする。
-  // 店舗・期限・バーコードは手で直している可能性があるため、空のときだけ埋める。
+  // 商品名と期限は読み取り精度の改善後に付け直すため、読めた値で既存値を上書きする。
+  // 店舗・バーコードは手で直している可能性があるため、空のときだけ埋める。
   async function bulkScanSelected() {
     const targets = coupons.filter((c) => selectedIds.includes(c.id) && c.imageDataUrl);
     if (!targets.length) {
@@ -1857,6 +1861,7 @@ export default function CouponApp() {
 
     setBulkScanProgress({ done: 0, total: targets.length });
     let nameCount = 0;
+    let dateCount = 0;
 
     for (let i = 0; i < targets.length; i++) {
       const c = targets[i];
@@ -1869,12 +1874,13 @@ export default function CouponApp() {
         const detectedName = extractProductNameGuess(lines);
 
         if (detectedName) nameCount++;
+        if (detectedDate) dateCount++;
 
         await saveCouponToCloud({
           ...c,
           productName: detectedName || c.productName || "",
           store: c.store || detectedStore || "",
-          expiresAt: c.expiresAt || detectedDate || "",
+          expiresAt: detectedDate || c.expiresAt || "",
           barcode: c.barcode || (barcodeText && (normalizeBarcode(barcodeText) || barcodeText)) || "",
           updatedAt: new Date().toISOString(),
         });
@@ -1890,7 +1896,7 @@ export default function CouponApp() {
     // 黙っていると「押したのに直らない」に見える。件数をはっきり伝える。
     const failed = targets.length - nameCount;
     notify(
-      `${targets.length}件を読み取り直しました（商品名を更新: ${nameCount}件）。` +
+      `${targets.length}件を読み取り直しました（商品名: ${nameCount}件、期限: ${dateCount}件を更新）。` +
         (failed ? `${failed}件は商品名を読み取れませんでした。開いて手入力してください。` : "")
     );
   }

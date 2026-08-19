@@ -69,6 +69,7 @@ test("ローソン券の空白区切り17桁バーコードを検出する", () 
 });
 
 test("ローソン券の店舗利用期限をOCRの崩れから復元する", () => {
+  const currentYear = String(new Date().getFullYear());
   const ocrTexts = [
     "店 贈 利 用 期限 2026708724 23:59 まで",
     "| 店 鞭 判 用 其 昌 | 2026/0S/24 23:59 まで",
@@ -80,6 +81,11 @@ test("ローソン券の店舗利用期限をOCRの崩れから復元する", ()
   for (const text of ocrTexts) {
     assert.equal(extractExpiryDate(text), "2026-08-24");
   }
+
+  assert.equal(
+    extractExpiryDate("uuUL 其 癌 2075/08/2423:59 ま で"),
+    `${currentYear}-08-24`
+  );
 });
 
 test("既存の日付パターンも従来どおり読む", () => {

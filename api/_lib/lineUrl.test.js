@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { extractFamimaCouponDetails, extractHttpUrls, extractPageMetadata, fetchUrlPreview } from "./lineUrl.js";
+import { extractFamimaCouponDetails, extractHttpUrls, extractPageMetadata, fetchUrlPreview, findFamimaProductImage } from "./lineUrl.js";
 
 test("LINEテキストから通常URLを取り出す", () => {
   assert.deepEqual(
@@ -48,4 +48,16 @@ test("ファミマのクーポン画面から商品名と有効期限を取得�
     productName: "キリン陸ハイボール 350ml缶（税込206円）",
     expiresAt: "2026-09-07",
   });
+});
+
+test("ファミマの券面からバーコード以外の商品画像を選ぶ", () => {
+  const html = `<main>
+    <img class="logo" src="/logo.png">
+    <img class="couponImg" alt="商品画像" src="/products/riku.png">
+    <img class="barcode" src="/barcode.png">
+  </main>`;
+  assert.equal(
+    findFamimaProductImage(html, "https://ncpfa.famima.com/contents/coupon.html", "キリン陸ハイボール 350ml缶（税込206円）"),
+    "https://ncpfa.famima.com/products/riku.png"
+  );
 });

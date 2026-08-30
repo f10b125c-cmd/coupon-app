@@ -195,6 +195,28 @@ function findImageWithClass(html, className, baseUrl) {
   return "";
 }
 
+// ファミマの券面にはバーコード以外に商品写真が載る。テンプレートのclass名が
+// 券種によって少し変わるため、商品らしい属性を優先して1枚だけ選ぶ。
+export function findFamimaProductImage(html, baseUrl, productName = "") {
+  let candidate = { score: 0, url: "" };
+  const name = String(productName).replace(/\s+/g, "").slice(0, 32);
+  for (const match of String(html).matchAll(/<img\b[^>]*>/gi)) {
+    const tag = match[0];
+    const src = attr(tag, "src");
+    const url = absoluteHttpUrl(src, baseUrl);
+    if (!url) continue;
+    const hints = [attr(tag, "class"), attr(tag, "id"), attr(tag, "alt"), src].join(" ").toLowerCase();
+    // バーコード、ロゴ、アイコンを商品画像として選ばない。
+    if (/barcode|qr(?:code)?|logo|icon/.test(hints)) continue;
+    let score = 0;
+    if (/product|item|goods|commodity|prize|gift|couponimg|商品画像|商品/.test(hints)) score += 3;
+    const alt = attr(tag, "alt").replace(/\s+/g, "");
+    if (name && alt.includes(name)) score += 5;
+    if (score > candidate.score) candidate = { score, url };
+  }
+  return candidate.url;
+}
+
 export function extractFamimaCouponDetails(html) {
   const text = decodeHtml(String(html || ""))
     .replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ")
@@ -235,10 +257,16 @@ export async function fetchFamimaCouponPreview(value) {
   const html = finalPage.buffer.toString("utf8");
   const details = extractFamimaCouponDetails(html);
   const barcodeUrl = findImageWithClass(html, "barcode", finalPage.finalUrl);
+  const productImageUrl = findFamimaProductImage(html, finalPage.finalUrl, details.productName);
   let image = null;
+  let productImage = null;
   if (barcodeUrl) {
     const barcode = await fetchPublic(barcodeUrl, MAX_IMAGE_BYTES, "image/*");
     if (barcode.contentType.startsWith("image/")) image = barcode.buffer;
+  }
+  if (productImageUrl) {
+    const product = await fetchPublic(productImageUrl, MAX_IMAGE_BYTES, "image/*");
+    if (product.contentType.startsWith("image/")) productImage = product.buffer;
   }
   return {
     title: details.productName || "ファミリーマート クーポン",
@@ -246,6 +274,7 @@ export async function fetchFamimaCouponPreview(value) {
     expiresAt: details.expiresAt,
     store: "familymart",
     image,
+    productImage,
     finalUrl: input.href,
     autoScanned: true,
   };

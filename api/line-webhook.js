@@ -14,6 +14,9 @@ const HOUSEHOLD_ID = process.env.HOUSEHOLD_ID || "LjsGkL-TYePy";
 // アプリに残らず、これがバーコード読み取りの素材になるため、
 // まず品質を下げ、寸法の縮小は最後の手段にして細い線を守る。
 const MAX_DATA_URL_CHARS = 700 * 1024;
+// 1つのFirestoreドキュメントに商品写真とバーコードの両方を保存するため、
+// ファミマURL由来の各画像は小さめに圧縮して合計サイズに余裕を持たせる。
+const MAX_FAMIMA_IMAGE_DATA_URL_CHARS = 340 * 1024;
 
 function verifySignature(rawBody, signature, channelSecret) {
   if (!signature) return false;
@@ -26,7 +29,7 @@ function verifySignature(rawBody, signature, channelSecret) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-async function compressToDataUrl(buffer) {
+async function compressToDataUrl(buffer, maxDataUrlChars = MAX_DATA_URL_CHARS) {
   let dim = 1600;
   let lastDataUrl = null;
   for (const quality of [85, 75, 65, 55, 45]) {
@@ -36,7 +39,7 @@ async function compressToDataUrl(buffer) {
       .jpeg({ quality, mozjpeg: true })
       .toBuffer();
     lastDataUrl = `data:image/jpeg;base64,${out.toString("base64")}`;
-    if (lastDataUrl.length <= MAX_DATA_URL_CHARS) return lastDataUrl;
+    if (lastDataUrl.length <= maxDataUrlChars) return lastDataUrl;
     if (quality <= 55) dim = Math.round(dim * 0.85);
   }
   // 品質を下げ切っても収まらない場合の最終手段
@@ -45,7 +48,9 @@ async function compressToDataUrl(buffer) {
     .resize({ width: 1000, height: 1000, fit: "inside", withoutEnlargement: true })
     .jpeg({ quality: 40, mozjpeg: true })
     .toBuffer();
-  return `data:image/jpeg;base64,${out.toString("base64")}`;
+  const dataUrl = `data:image/jpeg;base64,${out.toString("base64")}`;
+  if (dataUrl.length > maxDataUrlChars) throw new Error("画像が保存上限を超えています");
+  return dataUrl;
 }
 
 async function fetchLineImage(messageId, accessToken) {
@@ -89,12 +94,24 @@ async function saveUrlCouponFromLine(db, messageId, index, url, preview) {
   const now = new Date().toISOString();
   const id = `line-${messageId}-url-${index + 1}`;
   let imageDataUrl = null;
+  let productImageDataUrl = null;
   if (preview.image) {
     try {
-      imageDataUrl = await compressToDataUrl(preview.image);
+      imageDataUrl = await compressToDataUrl(
+        preview.image,
+        preview.productImage ? MAX_FAMIMA_IMAGE_DATA_URL_CHARS : MAX_DATA_URL_CHARS
+      );
     } catch (e) {
       // OG画像が壊れていても、URLとページタイトルは保存する。
       console.warn("[line-webhook] preview image conversion failed", messageId, e?.message || e);
+    }
+  }
+  if (preview.productImage) {
+    try {
+      productImageDataUrl = await compressToDataUrl(preview.productImage, MAX_FAMIMA_IMAGE_DATA_URL_CHARS);
+    } catch (e) {
+      // 商品画像だけ失敗しても、バーコード・URL・商品名は登録する。
+      console.warn("[line-webhook] product image conversion failed", messageId, e?.message || e);
     }
   }
   await db.doc(`households/${HOUSEHOLD_ID}/coupons/${id}`).set({
@@ -104,6 +121,7 @@ async function saveUrlCouponFromLine(db, messageId, index, url, preview) {
     sourceType: imageDataUrl ? "screenshot" : "url",
     url: preview.finalUrl || url,
     imageDataUrl,
+    productImageDataUrl,
     expiresAt: preview.expiresAt || "",
     store: preview.store || "",
     barcode: "",
@@ -116,7 +134,7 @@ async function saveUrlCouponFromLine(db, messageId, index, url, preview) {
     usedAt: null,
     source: "line",
   });
-  return { id, hasImage: !!imageDataUrl };
+  return { id, hasImage: !!imageDataUrl, hasProductImage: !!productImageDataUrl };
 }
 
 export async function POST(request) {
@@ -190,7 +208,7 @@ export async function POST(request) {
         }
         const saved = await saveUrlCouponFromLine(db, event.message.id, index, urls[index], preview);
         okCount++;
-        console.log(`[line-webhook] saved URL coupon ${saved.id} image=${saved.hasImage}`);
+        console.log(`[line-webhook] saved URL coupon ${saved.id} image=${saved.hasImage} productImage=${saved.hasProductImage}`);
       }
     } catch (e) {
       failCount++;

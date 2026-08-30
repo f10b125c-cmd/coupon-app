@@ -508,7 +508,7 @@ function TicketCard({ coupon, onOpen, selected, onToggleSelect }) {
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            {coupon.imageDataUrl && <ImageIcon size={13} color={COLORS.muted} />}
+            {(coupon.imageDataUrl || coupon.productImageDataUrl) && <ImageIcon size={13} color={COLORS.muted} />}
             {coupon.url && <LinkIcon size={13} color={COLORS.muted} />}
           </div>
           <StampBadge status={status} />
@@ -788,6 +788,7 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
   const [productName, setProductName] = useState(coupon.productName);
   const [url, setUrl] = useState(coupon.url || "");
   const [imageDataUrl, setImageDataUrl] = useState(coupon.imageDataUrl || null);
+  const productImageDataUrl = coupon.productImageDataUrl || null;
   const [expiresAt, setExpiresAt] = useState(coupon.expiresAt);
   const [store, setStore] = useState(coupon.store || "");
   const [memo, setMemo] = useState(coupon.memo || "");
@@ -929,6 +930,7 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
       productName,
       url,
       imageDataUrl: finalImage,
+      productImageDataUrl,
       sourceType: finalImage ? "screenshot" : url ? "url" : coupon.sourceType,
       expiresAt,
       store,
@@ -1073,6 +1075,24 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
 
         {editing ? (
           <>
+            {productImageDataUrl && (
+              <div style={{ marginBottom: 14 }}>
+                <div style={fieldLabel}>商品画像</div>
+                <img
+                  src={productImageDataUrl}
+                  alt={coupon.productName || "商品画像"}
+                  style={{
+                    width: "100%",
+                    maxHeight: 180,
+                    objectFit: "contain",
+                    borderRadius: 12,
+                    border: `1px solid ${COLORS.line}`,
+                    display: "block",
+                    background: "#FFF9F6",
+                  }}
+                />
+              </div>
+            )}
             <div style={fieldLabel}>クーポン画像（任意）</div>
             {imageDataUrl ? (
               <div style={{ position: "relative", marginBottom: 10 }}>
@@ -1306,6 +1326,23 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
           </>
         ) : (
           <>
+            {coupon.productImageDataUrl && (
+              <div style={{ marginBottom: 12 }}>
+                <img
+                  src={coupon.productImageDataUrl}
+                  alt={coupon.productName || "商品画像"}
+                  style={{
+                    width: "100%",
+                    maxHeight: 220,
+                    objectFit: "contain",
+                    borderRadius: 12,
+                    border: `1px solid ${COLORS.line}`,
+                    display: "block",
+                    background: "#FFF9F6",
+                  }}
+                />
+              </div>
+            )}
             {coupon.imageDataUrl && (
               <div style={{ marginBottom: 12 }}>
                 <button

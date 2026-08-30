@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { extractHttpUrls, extractPageMetadata, fetchUrlPreview } from "./lineUrl.js";
+import { extractFamimaCouponDetails, extractHttpUrls, extractPageMetadata, fetchUrlPreview } from "./lineUrl.js";
 
 test("LINEテキストから通常URLを取り出す", () => {
   assert.deepEqual(
@@ -40,4 +40,12 @@ test("OG情報がなければtitleとimage_srcを使う", () => {
 
 test("プライベートIPのURLは取得しない", async () => {
   await assert.rejects(() => fetchUrlPreview("http://127.0.0.1/coupon"), /プライベートIP/);
+});
+
+test("ファミマのクーポン画面から商品名と有効期限を取得する", () => {
+  const html = `<main>ファミリーマートクーポン　引換券 キリン陸ハイボール 350ml缶（税込206円） 有効期限：2026年09月07日(月) 23:59</main>`;
+  assert.deepEqual(extractFamimaCouponDetails(html), {
+    productName: "キリン陸ハイボール 350ml缶（税込206円）",
+    expiresAt: "2026-09-07",
+  });
 });

@@ -3,6 +3,7 @@ import net from "node:net";
 
 const MAX_HTML_BYTES = 2 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
+const MAX_JSON_BYTES = 512 * 1024;
 const FETCH_TIMEOUT_MS = 7000;
 
 function trimUrlPunctuation(value) {
@@ -154,6 +155,100 @@ async function fetchPublic(value, maxBytes, accept) {
     };
   }
   throw new Error("転送回数が上限を超えています");
+}
+
+function isFamimaCouponUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.hostname === "ncpfa.famima.com" && url.pathname === "/prd/ebcweb";
+  } catch {
+    return false;
+  }
+}
+
+function famimaInternalUrl(value, baseUrl, allowedPrefixes = ["/prd/"]) {
+  const url = new URL(value, baseUrl);
+  if (url.protocol !== "https:" || url.hostname !== "ncpfa.famima.com" || !allowedPrefixes.some((prefix) => url.pathname.startsWith(prefix))) {
+    throw new Error("ファミマの想定外の取得先です");
+  }
+  return url;
+}
+
+function appendParams(url, params) {
+  if (!params) return url;
+  const entries = typeof params === "string" ? new URLSearchParams(params) : Object.entries(params);
+  for (const [key, value] of entries) url.searchParams.set(key, String(value));
+  return url;
+}
+
+function famimaRequestParam(html, key) {
+  return String(html).match(new RegExp(`${key}\\s*:\\s*['\"]([^'\"]+)`))?.[1] || "";
+}
+
+function findImageWithClass(html, className, baseUrl) {
+  for (const match of String(html).matchAll(/<img\b[^>]*>/gi)) {
+    const tag = match[0];
+    if (attr(tag, "class").split(/\s+/).includes(className)) {
+      return absoluteHttpUrl(attr(tag, "src"), baseUrl);
+    }
+  }
+  return "";
+}
+
+export function extractFamimaCouponDetails(html) {
+  const text = decodeHtml(String(html || ""))
+    .replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const productName = text.match(/引換券\s+(.+?)\s+有効期限[：:]/)?.[1]?.trim().slice(0, 180) || "";
+  const date = text.match(/有効期限[：:]\s*(20\d{2})年\s*(\d{1,2})月\s*(\d{1,2})日/);
+  const expiresAt = date
+    ? `${date[1]}-${date[2].padStart(2, "0")}-${date[3].padStart(2, "0")}`
+    : "";
+  return { productName, expiresAt };
+}
+
+export async function fetchFamimaCouponPreview(value) {
+  if (!isFamimaCouponUrl(value)) throw new Error("ファミマのクーポンURLではありません");
+  const input = new URL(value);
+  const first = await fetchPublic(input, MAX_HTML_BYTES, "text/html");
+  const endpoint = String(first.buffer).match(/request\(\s*['\"]([^'\"]+)/)?.[1];
+  if (!endpoint) throw new Error("ファミマのクーポン取得先が見つかりません");
+  const requestUrl = famimaInternalUrl(endpoint, first.finalUrl);
+  for (const key of ["eKey", "cpNo", "gyNo"]) requestUrl.searchParams.set(key, input.searchParams.get(key) || "");
+  for (const key of ["token", "lang"]) {
+    const parameter = famimaRequestParam(first.buffer.toString("utf8"), key);
+    if (parameter) requestUrl.searchParams.set(key, parameter);
+  }
+  const firstResponse = await fetchPublic(requestUrl, MAX_JSON_BYTES, "application/json");
+  const firstJson = JSON.parse(firstResponse.buffer.toString("utf8"));
+  if (!firstJson.url) throw new Error("ファミマのクーポン情報を取得できません");
+  const secondUrl = appendParams(famimaInternalUrl(firstJson.url, input), firstJson.params);
+  const secondResponse = await fetchPublic(secondUrl, MAX_JSON_BYTES, "application/json");
+  const secondJson = JSON.parse(secondResponse.buffer.toString("utf8"));
+  if (!secondJson.url || Number(secondJson.statusCode) !== 200) {
+    throw new Error("ファミマのクーポン画面を取得できません");
+  }
+  const finalUrl = famimaInternalUrl(secondJson.url, input, ["/contents/"]);
+  const finalPage = await fetchPublic(finalUrl, MAX_HTML_BYTES, "text/html");
+  const html = finalPage.buffer.toString("utf8");
+  const details = extractFamimaCouponDetails(html);
+  const barcodeUrl = findImageWithClass(html, "barcode", finalPage.finalUrl);
+  let image = null;
+  if (barcodeUrl) {
+    const barcode = await fetchPublic(barcodeUrl, MAX_IMAGE_BYTES, "image/*");
+    if (barcode.contentType.startsWith("image/")) image = barcode.buffer;
+  }
+  return {
+    title: details.productName || "ファミリーマート クーポン",
+    productName: details.productName,
+    expiresAt: details.expiresAt,
+    store: "familymart",
+    image,
+    finalUrl: input.href,
+    autoScanned: true,
+  };
 }
 
 export async function fetchUrlPreview(value) {

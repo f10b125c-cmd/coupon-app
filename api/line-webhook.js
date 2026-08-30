@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import sharp from "sharp";
 import { getDb } from "./_lib/firebaseAdmin.js";
-import { extractHttpUrls, fetchUrlPreview } from "./_lib/lineUrl.js";
+import { extractHttpUrls, fetchFamimaCouponPreview, fetchUrlPreview } from "./_lib/lineUrl.js";
 
 // 家族LINEグループに投稿されたクーポン画像またはURLを受け取り、
 // アプリの「未整理」としてFirestoreに登録するwebhook。
@@ -100,14 +100,14 @@ async function saveUrlCouponFromLine(db, messageId, index, url, preview) {
   await db.doc(`households/${HOUSEHOLD_ID}/coupons/${id}`).set({
     id,
     title: preview.title || "",
-    productName: "",
+    productName: preview.productName || "",
     sourceType: imageDataUrl ? "screenshot" : "url",
     url: preview.finalUrl || url,
     imageDataUrl,
-    expiresAt: "",
-    store: "",
+    expiresAt: preview.expiresAt || "",
+    store: preview.store || "",
     barcode: "",
-    autoScanned: !imageDataUrl,
+    autoScanned: preview.autoScanned ?? !imageDataUrl,
     inbox: true,
     status: "unused",
     memo: "",
@@ -181,7 +181,9 @@ export async function POST(request) {
         if ((await docRef.get()).exists) continue;
         let preview = { title: "", image: null, finalUrl: urls[index] };
         try {
-          preview = await fetchUrlPreview(urls[index]);
+          preview = new URL(urls[index]).hostname === "ncpfa.famima.com"
+            ? await fetchFamimaCouponPreview(urls[index])
+            : await fetchUrlPreview(urls[index]);
         } catch (e) {
           // ページ側がBot取得を拒否しても、URLそのものは未整理へ残す。
           console.warn("[line-webhook] URL preview unavailable", event.message.id, e?.message || e);

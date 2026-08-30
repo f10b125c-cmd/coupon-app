@@ -1239,6 +1239,27 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
                 style={{ ...inputStyle, wordBreak: "break-all" }}
               />
             </label>
+            {url.trim() && (
+              <a
+                href={url.trim()}
+                target="_blank"
+                rel="noreferrer"
+                style={{
+                  ...primaryBtn(COLORS.ink),
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
+                  textDecoration: "none",
+                  marginTop: -4,
+                  marginBottom: 14,
+                }}
+              >
+                <ScanLine size={15} />
+                URLを開いてスキャン
+                <ExternalLink size={13} />
+              </a>
+            )}
             <label style={fieldLabel}>
               商品名
               <input value={productName} onChange={(e) => setProductName(e.target.value)} style={inputStyle} />
@@ -1411,8 +1432,9 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
                   marginBottom: 10,
                 }}
               >
-                <ExternalLink size={15} />
-                クーポンを開く
+                <ScanLine size={15} />
+                URLを開いてスキャン
+                <ExternalLink size={13} />
               </a>
             )}
 

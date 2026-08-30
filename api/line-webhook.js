@@ -1,8 +1,9 @@
 import crypto from "node:crypto";
 import sharp from "sharp";
 import { getDb } from "./_lib/firebaseAdmin.js";
+import { extractHttpUrls, fetchUrlPreview } from "./_lib/lineUrl.js";
 
-// 家族LINEグループに投稿されたクーポン画像を受け取り、
+// 家族LINEグループに投稿されたクーポン画像またはURLを受け取り、
 // アプリの「未整理」としてFirestoreに登録するwebhook。
 // LINE Developersコンソールで Webhook URL に /api/line-webhook を設定して使う。
 
@@ -84,6 +85,40 @@ async function saveCouponFromLine(db, messageId, imageDataUrl) {
   });
 }
 
+async function saveUrlCouponFromLine(db, messageId, index, url, preview) {
+  const now = new Date().toISOString();
+  const id = `line-${messageId}-url-${index + 1}`;
+  let imageDataUrl = null;
+  if (preview.image) {
+    try {
+      imageDataUrl = await compressToDataUrl(preview.image);
+    } catch (e) {
+      // OG画像が壊れていても、URLとページタイトルは保存する。
+      console.warn("[line-webhook] preview image conversion failed", messageId, e?.message || e);
+    }
+  }
+  await db.doc(`households/${HOUSEHOLD_ID}/coupons/${id}`).set({
+    id,
+    title: preview.title || "",
+    productName: "",
+    sourceType: imageDataUrl ? "screenshot" : "url",
+    url: preview.finalUrl || url,
+    imageDataUrl,
+    expiresAt: "",
+    store: "",
+    barcode: "",
+    autoScanned: !imageDataUrl,
+    inbox: true,
+    status: "unused",
+    memo: "",
+    createdAt: now,
+    updatedAt: now,
+    usedAt: null,
+    source: "line",
+  });
+  return { id, hasImage: !!imageDataUrl };
+}
+
 export async function POST(request) {
   const channelSecret = process.env.LINE_CHANNEL_SECRET;
   const accessToken = process.env.LINE_CHANNEL_ACCESS_TOKEN;
@@ -115,7 +150,7 @@ export async function POST(request) {
       console.log("[line-webhook] joined group. groupId:", event.source.groupId);
       continue;
     }
-    if (event.type !== "message" || event.message?.type !== "image") continue;
+    if (event.type !== "message") continue;
     if (event.source?.type !== "group") continue;
     if (!targetGroupId) {
       // LINE_TARGET_GROUP_ID 未設定の間は登録せず、設定用にgroupIdだけ知らせる
@@ -126,15 +161,35 @@ export async function POST(request) {
 
     try {
       const db = getDb();
-      const docRef = db.doc(`households/${HOUSEHOLD_ID}/coupons/line-${event.message.id}`);
-      // webhookは同じイベントが再配送されることがあるため、登録済みならskip
-      if ((await docRef.get()).exists) continue;
+      if (event.message?.type === "image") {
+        const docRef = db.doc(`households/${HOUSEHOLD_ID}/coupons/line-${event.message.id}`);
+        // webhookは同じイベントが再配送されることがあるため、登録済みならskip
+        if ((await docRef.get()).exists) continue;
+        const image = await fetchLineImage(event.message.id, accessToken);
+        const dataUrl = await compressToDataUrl(image);
+        await saveCouponFromLine(db, event.message.id, dataUrl);
+        okCount++;
+        console.log("[line-webhook] saved coupon line-" + event.message.id);
+        continue;
+      }
 
-      const image = await fetchLineImage(event.message.id, accessToken);
-      const dataUrl = await compressToDataUrl(image);
-      await saveCouponFromLine(db, event.message.id, dataUrl);
-      okCount++;
-      console.log("[line-webhook] saved coupon line-" + event.message.id);
+      if (event.message?.type !== "text") continue;
+      const urls = extractHttpUrls(event.message.text).slice(0, 3);
+      for (let index = 0; index < urls.length; index++) {
+        const id = `line-${event.message.id}-url-${index + 1}`;
+        const docRef = db.doc(`households/${HOUSEHOLD_ID}/coupons/${id}`);
+        if ((await docRef.get()).exists) continue;
+        let preview = { title: "", image: null, finalUrl: urls[index] };
+        try {
+          preview = await fetchUrlPreview(urls[index]);
+        } catch (e) {
+          // ページ側がBot取得を拒否しても、URLそのものは未整理へ残す。
+          console.warn("[line-webhook] URL preview unavailable", event.message.id, e?.message || e);
+        }
+        const saved = await saveUrlCouponFromLine(db, event.message.id, index, urls[index], preview);
+        okCount++;
+        console.log(`[line-webhook] saved URL coupon ${saved.id} image=${saved.hasImage}`);
+      }
     } catch (e) {
       failCount++;
       console.error("[line-webhook] 取り込みに失敗しました", event.message?.id, e);

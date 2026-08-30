@@ -45,6 +45,8 @@ npm run build
 npx --yes vercel@latest --prod --yes
 ```
 
+このVercelプロジェクトはGitHub pushだけでは自動公開されない。`Not authorized` が出た場合は、先に `npx --yes vercel@latest login` を実行し、表示されるVercelのデバイスログイン画面で承認してから再実行する。Vercelの認証値は文書や`.env`へ保存しない。
+
 公開後は `https://coupon-app-dusky.vercel.app` が新しいデプロイへエイリアスされたことを確認する。
 PWAのService Workerが旧JavaScriptを保持することがあるため、スマホ確認時はアプリを完全に閉じて開き直す。
 

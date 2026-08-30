@@ -10,6 +10,10 @@ URL取得処理は `api/_lib/lineUrl.js` に分離した。リダイレクトご
 
 LINE Messaging APIには、受信済みテキスト本文を後から取得するAPIがない。対応前に投稿され、Webhookが200を返して無視したURLは復元できないため、公開後にLINEへ再投稿してもらう。
 
+### Vercel公開時の注意（2026-08-31確認）
+
+このプロジェクトはGitHubリポジトリとの自動デプロイ連携が未設定。**GitHubへのpushだけでは本番更新されない**。公開時は `npx --yes vercel@latest --prod --yes` を実行する。CLIが `Not authorized` になった場合は `npx --yes vercel@latest login` を実行し、表示されたデバイスログインURLをブラウザで承認する。トークンをコピー・記録する必要はない。
+
 ## 2026-08-10 LINE自動取り込みのセットアップ完了 ＋ 詳細シートの高さ修正
 
 ### LINE取り込みが本番で動くようになった

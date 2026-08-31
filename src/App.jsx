@@ -751,38 +751,6 @@ function filesToDataUrls(fileList) {
 /* ---------------------------------------------------------
    詳細 / 編集モーダル
 --------------------------------------------------------- */
-function SwipeArrows({ onPrev, onNext }) {
-  const btnStyle = {
-    position: "absolute",
-    top: "50%",
-    transform: "translateY(-50%)",
-    width: 36,
-    height: 36,
-    borderRadius: "50%",
-    border: "none",
-    background: "rgba(255,253,251,0.9)",
-    boxShadow: "0 2px 8px rgba(91,74,72,0.25)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    cursor: "pointer",
-  };
-  return (
-    <>
-      {onPrev && (
-        <button onClick={onPrev} aria-label="前のクーポン" style={{ ...btnStyle, left: 8 }}>
-          <ChevronLeft size={20} color={COLORS.ink} />
-        </button>
-      )}
-      {onNext && (
-        <button onClick={onNext} aria-label="次のクーポン" style={{ ...btnStyle, right: 8 }}>
-          <ChevronRight size={20} color={COLORS.ink} />
-        </button>
-      )}
-    </>
-  );
-}
-
 function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onNext, position }) {
   const [editing, setEditing] = useState(!!coupon.inbox);
   const [productName, setProductName] = useState(coupon.productName);
@@ -798,7 +766,6 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
   const touchStartRef = useRef({ x: 0, y: 0 });
 
   const status = computeStatus(coupon);
-  const hasImage = !!coupon.imageDataUrl;
   const barcodeDetectedStore = detectStoreFromBarcode(barcode);
   const barcodeDup = findDuplicateCoupon(coupons, barcode, coupon.id);
 
@@ -1054,15 +1021,27 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
             )}
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            {!hasImage && onPrev && (
-              <button onClick={onPrev} aria-label="前のクーポン" style={{ ...iconBtnStyle, width: 36, height: 36 }}>
-                <ChevronLeft size={18} color={COLORS.ink} />
-              </button>
-            )}
-            {!hasImage && onNext && (
-              <button onClick={onNext} aria-label="次のクーポン" style={{ ...iconBtnStyle, width: 36, height: 36 }}>
-                <ChevronRight size={18} color={COLORS.ink} />
-              </button>
+            {(onPrev || onNext) && (
+              <div
+                style={{
+                  display: "flex",
+                  gap: 6,
+                  paddingRight: 8,
+                  marginRight: 2,
+                  borderRight: `1px solid ${COLORS.line}`,
+                }}
+              >
+                {onPrev && (
+                  <button onClick={onPrev} aria-label="前のクーポン" style={{ ...iconBtnStyle, width: 36, height: 36 }}>
+                    <ChevronLeft size={18} color={COLORS.ink} />
+                  </button>
+                )}
+                {onNext && (
+                  <button onClick={onNext} aria-label="次のクーポン" style={{ ...iconBtnStyle, width: 36, height: 36 }}>
+                    <ChevronRight size={18} color={COLORS.ink} />
+                  </button>
+                )}
+              </div>
             )}
             <button onClick={() => setEditing((v) => !v)} style={{ ...iconBtnStyle, width: 44, height: 44 }}>
               {editing ? <Check size={20} color={COLORS.forest} /> : <Pencil size={19} color={COLORS.ink} />}
@@ -1095,7 +1074,7 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
             )}
             <div style={fieldLabel}>クーポン画像（任意）</div>
             {imageDataUrl ? (
-              <div style={{ position: "relative", marginBottom: 10 }}>
+              <div style={{ marginBottom: 14 }}>
                 <img
                   src={imageDataUrl}
                   alt="クーポン画像"
@@ -1109,9 +1088,8 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
                     background: "#FFF9F6",
                   }}
                 />
-                <SwipeArrows onPrev={onPrev} onNext={onNext} />
-                <div style={{ position: "absolute", bottom: 8, right: 8, display: "flex", gap: 6 }}>
-                  <div style={{ position: "relative" }}>
+                <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+                  <div style={{ position: "relative", flex: 1 }}>
                     <input
                       type="file"
                       accept="image/*"
@@ -1125,13 +1103,27 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
                         cursor: "pointer",
                       }}
                     />
-                    <span style={smallBtnStyle}>写真を変更</span>
+                    <span
+                      style={{
+                        ...imageActionBtnStyle,
+                        display: "block",
+                        textAlign: "center",
+                        boxSizing: "border-box",
+                      }}
+                    >
+                      画像を変更
+                    </span>
                   </div>
                   <button
                     onClick={() => setImageDataUrl(null)}
-                    style={{ ...smallBtnStyle, background: "rgba(184,67,58,0.85)" }}
+                    style={{
+                      ...imageActionBtnStyle,
+                      flex: 1,
+                      color: "#B8433A",
+                      borderColor: "rgba(184,67,58,0.35)",
+                    }}
                   >
-                    削除
+                    画像を削除
                   </button>
                 </div>
               </div>
@@ -1384,13 +1376,12 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
             )}
 
             {coupon.imageDataUrl && (
-              <div style={{ position: "relative", marginBottom: 12 }}>
+              <div style={{ marginBottom: 12 }}>
                 <img
                   src={coupon.imageDataUrl}
                   alt={coupon.productName}
                   style={{ width: "100%", borderRadius: 12, border: `1px solid ${COLORS.line}`, display: "block" }}
                 />
-                <SwipeArrows onPrev={onPrev} onNext={onNext} />
               </div>
             )}
 
@@ -1558,14 +1549,15 @@ const iconBtnStyle = {
   cursor: "pointer",
 };
 
-const smallBtnStyle = {
-  padding: "6px 10px",
+const imageActionBtnStyle = {
+  padding: "10px 12px",
   borderRadius: 8,
-  border: "none",
-  background: "rgba(43,42,37,0.75)",
-  color: "#fff",
+  border: `1px solid ${COLORS.line}`,
+  background: "#FFF9F6",
+  color: COLORS.ink,
   fontFamily: "'M PLUS Rounded 1c', sans-serif",
-  fontSize: 11,
+  fontSize: 12,
+  fontWeight: 700,
   cursor: "pointer",
 };
 

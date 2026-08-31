@@ -123,7 +123,8 @@ async function saveUrlCouponFromLine(db, messageId, index, url, preview) {
     imageDataUrl,
     productImageDataUrl,
     expiresAt: preview.expiresAt || "",
-    store: preview.store || "",
+    // 過去の取得コードが返していた `familymart` も画面側の内部キーへ正規化する。
+    store: preview.store === "familymart" ? "famima" : preview.store || "",
     barcode: "",
     autoScanned: preview.autoScanned ?? !imageDataUrl,
     inbox: true,

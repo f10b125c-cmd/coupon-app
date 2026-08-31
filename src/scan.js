@@ -10,6 +10,12 @@ const STORE_BARCODE_RULES = [
   { key: "famima", test: (d) => d.length >= 24 && d.length <= 28 && d.startsWith("10") },
 ];
 
+// アプリ内のファミマ店舗キーは `famima`。外部取得側などから正式英名の
+// `familymart` が来ても、画面の選択肢と一致するキーへ揃える。
+export function normalizeStoreKey(value) {
+  return value === "familymart" ? "famima" : value || "";
+}
+
 export function detectStoreFromBarcode(rawText) {
   const digits = (rawText || "").replace(/\D/g, "");
   if (!digits) return "";

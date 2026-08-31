@@ -22,6 +22,7 @@ import {
   extractExpiryDate,
   extractProductNameGuess,
   extractBarcodeNumberGuess,
+  normalizeStoreKey,
 } from "./scan.js";
 import {
   subscribeCoupons,
@@ -116,9 +117,9 @@ const STORES = [
   { key: "other", label: "その他", short: "その他", color: "#8C8368", bg: "#EFEAD9" },
 ];
 
-const storeLabel = (key) => STORES.find((s) => s.key === key)?.label || "";
+const storeLabel = (key) => STORES.find((s) => s.key === normalizeStoreKey(key))?.label || "";
 const storeColors = (key) =>
-  STORES.find((s) => s.key === key) || { color: "#8C8368", bg: "#EFEAD9" };
+  STORES.find((s) => s.key === normalizeStoreKey(key)) || { color: "#8C8368", bg: "#EFEAD9" };
 
 function displayName(coupon) {
   if (coupon.productName) return coupon.productName;
@@ -758,7 +759,7 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
   const [imageDataUrl, setImageDataUrl] = useState(coupon.imageDataUrl || null);
   const productImageDataUrl = coupon.productImageDataUrl || null;
   const [expiresAt, setExpiresAt] = useState(coupon.expiresAt);
-  const [store, setStore] = useState(coupon.store || "");
+  const [store, setStore] = useState(normalizeStoreKey(coupon.store));
   const [memo, setMemo] = useState(coupon.memo || "");
   const [barcode, setBarcode] = useState(coupon.barcode || "");
   const [scanning, setScanning] = useState(false);
@@ -941,7 +942,7 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
       const next = {
         ...coupon,
         productName: detectedName || coupon.productName || "",
-        store: coupon.store || detectedStore || "",
+        store: normalizeStoreKey(coupon.store) || detectedStore || "",
         expiresAt: detectedDate || coupon.expiresAt || "",
         barcode:
           coupon.barcode || (barcodeText && (normalizeBarcode(barcodeText) || barcodeText)) || "",
@@ -1606,6 +1607,7 @@ async function migrateLocalDataIfNeeded() {
 
   for (const raw of localCoupons) {
     const coupon = { store: "", inbox: false, barcode: "", ...raw };
+    coupon.store = normalizeStoreKey(coupon.store);
     if (coupon.imageDataUrl) {
       try {
         coupon.imageDataUrl = await compressImageForStorage(coupon.imageDataUrl);
@@ -1692,7 +1694,14 @@ export default function CouponApp() {
         unsubscribe = await subscribeCoupons(
           (list) => {
             if (cancelled) return;
-            setCoupons(list.map((c) => ({ store: "", inbox: false, barcode: "", ...c })));
+            setCoupons(
+              list.map((c) => ({
+                inbox: false,
+                barcode: "",
+                ...c,
+                store: normalizeStoreKey(c.store),
+              }))
+            );
             setLoaded(true);
             setSyncError(false);
           },
@@ -1880,7 +1889,7 @@ export default function CouponApp() {
 
         const updated = {
           ...c,
-          store: c.store || detectedStore || "",
+          store: normalizeStoreKey(c.store) || detectedStore || "",
           expiresAt: c.expiresAt || detectedDate || "",
           productName: c.productName || detectedName || "",
           barcode: (barcodeText && (normalizeBarcode(barcodeText) || barcodeText)) || c.barcode || "",
@@ -1937,7 +1946,7 @@ export default function CouponApp() {
         await saveCouponToCloud({
           ...c,
           productName: detectedName || c.productName || "",
-          store: c.store || detectedStore || "",
+          store: normalizeStoreKey(c.store) || detectedStore || "",
           expiresAt: detectedDate || c.expiresAt || "",
           barcode: c.barcode || (barcodeText && (normalizeBarcode(barcodeText) || barcodeText)) || "",
           updatedAt: new Date().toISOString(),

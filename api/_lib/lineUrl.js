@@ -275,7 +275,8 @@ export async function fetchFamimaCouponPreview(value) {
     title: details.productName || "ファミリーマート クーポン",
     productName: details.productName,
     expiresAt: details.expiresAt,
-    store: "familymart",
+    // クライアント側の店舗マスタと同じ内部キーを使う。
+    store: "famima",
     image,
     productImage,
     finalUrl: input.href,

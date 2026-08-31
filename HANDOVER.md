@@ -6,7 +6,7 @@
 
 URL取得処理は `api/_lib/lineUrl.js` に分離した。リダイレクトごとに公開HTTP URLかを検査し、ローカル名・プライベートIPを拒否する。HTMLは2MiB、画像は12MiB、1回7秒、リダイレクト4回まで。変更時はSSRＦ対策とサイズ上限を外さないこと。抽出・メタデータ処理の回帰テストは `api/_lib/lineUrl.test.js`。
 
-ファミマの `ncpfa.famima.com/prd/ebcweb` はOG画像を持たず、ブラウザ上で追加のクーポン画面を読み込む特殊形式。`fetchFamimaCouponPreview()` で公式ページの遷移を最大2段追い、商品名・有効期限・POSバーコード画像に加え、**商品画像**も取得して、店舗を `familymart` として保存する。バーコードは `imageDataUrl`、商品画像は `productImageDataUrl` に分けて保存し、Firestoreの1MiB上限を超えないよう、ファミマ由来の画像は各340KB以下に圧縮する。URLを持つクーポンは、詳細表示・未整理の編集画面のどちらにも **「URLを開いてスキャン」** ボタンを表示する。これは元のクーポンを別タブで開き、レジでバーコードを提示するためのボタン。
+ファミマの `ncpfa.famima.com/prd/ebcweb` はOG画像を持たず、ブラウザ上で追加のクーポン画面を読み込む特殊形式。`fetchFamimaCouponPreview()` で公式ページの遷移を最大2段追い、商品名・有効期限・POSバーコード画像に加え、**商品画像**も取得して、店舗を `famima` として保存する。画面の店舗マスタも `famima` のため、正式英名の `familymart` を保存すると「読み取れているのに店舗未選択」に見える。外部値は `normalizeStoreKey()` で必ず内部キーへ揃える。バーコードは `imageDataUrl`、商品画像は `productImageDataUrl` に分けて保存し、Firestoreの1MiB上限を超えないよう、ファミマ由来の画像は各340KB以下に圧縮する。URLを持つクーポンは、詳細表示・未整理の編集画面のどちらにも **「URLを開いてスキャン」** ボタンを表示する。これは元のクーポンを別タブで開き、レジでバーコードを提示するためのボタン。
 
 商品画像URLには署名クエリが付く。署名のランダム文字列に `qr` などが偶然含まれることがあるため、商品画像・QR・バーコードの判定にクエリ文字列を使わないこと。`findFamimaProductImage()` はclass・id・alt・URLのパスだけで判定する。
 

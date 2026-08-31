@@ -6,6 +6,7 @@ import {
   extractBarcodeNumberGuess,
   extractExpiryDate,
   extractProductNameGuess,
+  normalizeStoreKey,
 } from "./scan.js";
 
 function lines(...texts) {
@@ -15,6 +16,12 @@ function lines(...texts) {
     y1: 24 + index * 18,
   }));
 }
+
+test("ファミマの外部店舗キーを画面の内部キーへ揃える", () => {
+  assert.equal(normalizeStoreKey("familymart"), "famima");
+  assert.equal(normalizeStoreKey("famima"), "famima");
+  assert.equal(normalizeStoreKey("lawson"), "lawson");
+});
 
 test("ローソンお持ち帰り限定券の商品名を上部見出しから読む", () => {
   assert.equal(

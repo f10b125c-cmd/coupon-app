@@ -8,6 +8,8 @@ URL取得処理は `api/_lib/lineUrl.js` に分離した。リダイレクトご
 
 ファミマの `ncpfa.famima.com/prd/ebcweb` はOG画像を持たず、ブラウザ上で追加のクーポン画面を読み込む特殊形式。`fetchFamimaCouponPreview()` で公式ページの遷移を最大2段追い、商品名・有効期限・POSバーコード画像に加え、**商品画像**も取得して、店舗を `familymart` として保存する。バーコードは `imageDataUrl`、商品画像は `productImageDataUrl` に分けて保存し、Firestoreの1MiB上限を超えないよう、ファミマ由来の画像は各340KB以下に圧縮する。URLを持つクーポンは、詳細表示・未整理の編集画面のどちらにも **「URLを開いてスキャン」** ボタンを表示する。これは元のクーポンを別タブで開き、レジでバーコードを提示するためのボタン。
 
+商品画像URLには署名クエリが付く。署名のランダム文字列に `qr` などが偶然含まれることがあるため、商品画像・QR・バーコードの判定にクエリ文字列を使わないこと。`findFamimaProductImage()` はclass・id・alt・URLのパスだけで判定する。
+
 LINE Messaging APIには、受信済みテキスト本文を後から取得するAPIがない。対応前に投稿され、Webhookが200を返して無視したURLは復元できないため、公開後にLINEへ再投稿してもらう。
 
 ### Vercel公開時の注意（2026-08-31確認）

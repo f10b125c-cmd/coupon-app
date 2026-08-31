@@ -53,11 +53,11 @@ test("ファミマのクーポン画面から商品名と有効期限を取得�
 test("ファミマの券面からバーコード以外の商品画像を選ぶ", () => {
   const html = `<main>
     <img class="logo" src="/logo.png">
-    <img class="couponImg" alt="商品画像" src="/products/riku.png">
+    <img class="couponImg" alt="商品画像" src="/products/riku.png?signature=qr-random-token">
     <img class="barcode" src="/barcode.png">
   </main>`;
   assert.equal(
     findFamimaProductImage(html, "https://ncpfa.famima.com/contents/coupon.html", "キリン陸ハイボール 350ml缶（税込206円）"),
-    "https://ncpfa.famima.com/products/riku.png"
+    "https://ncpfa.famima.com/products/riku.png?signature=qr-random-token"
   );
 });

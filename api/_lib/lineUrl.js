@@ -205,7 +205,10 @@ export function findFamimaProductImage(html, baseUrl, productName = "") {
     const src = attr(tag, "src");
     const url = absoluteHttpUrl(src, baseUrl);
     if (!url) continue;
-    const hints = [attr(tag, "class"), attr(tag, "id"), attr(tag, "alt"), src].join(" ").toLowerCase();
+    // 署名つき画像URLのクエリはランダム文字列を含み、たまたま "qr" などが
+    // 現れることがある。画像種別の判定にはクエリを使わずパスだけを見る。
+    const srcPath = new URL(url).pathname;
+    const hints = [attr(tag, "class"), attr(tag, "id"), attr(tag, "alt"), srcPath].join(" ").toLowerCase();
     // バーコード、ロゴ、アイコンを商品画像として選ばない。
     if (/barcode|qr(?:code)?|logo|icon/.test(hints)) continue;
     let score = 0;

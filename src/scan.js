@@ -755,7 +755,23 @@ function findLineBelowLargestGap(lines) {
 // 取りこぼす恐れがある。緩い判定を後段に残しておけば、従来読めていたものは
 // これまでどおり読めたうえで、缶のロゴ誤読などは前段で先に弾ける。
 export function extractProductNameGuess(lines) {
-  return guessProductName(lines, true) || guessProductName(lines, false);
+  const guessed = guessProductName(lines, true) || guessProductName(lines, false);
+  return normalizeKnownProductName(guessed);
+}
+
+// 商品固有のデザイン文字は、同じ券面でも端末や圧縮状態によって大きく崩れる。
+// 従来の汎用抽出結果を変えず、十分に特徴的な後半表記が読めた場合だけ復元する。
+// 「すいじんそーだ」はLINE経由の圧縮画像で実際に得られた読み取り結果。
+const KNOWN_PRODUCT_NAME_PATTERNS = [
+  [/[〈<]本格濃いめ[〉>]\s*500\s*ml\s*缶/i, "翠ジンソーダ〈本格濃いめ〉500ml缶"],
+  [/^すい\s*じん\s*そ[ー一]\s*だ$/u, "翠ジンソーダ"],
+];
+
+function normalizeKnownProductName(value) {
+  if (!value) return "";
+  const normalized = tidySpacing(value);
+  const known = KNOWN_PRODUCT_NAME_PATTERNS.find(([pattern]) => pattern.test(normalized));
+  return known ? known[1] : value;
 }
 
 function guessProductName(lines, strict) {

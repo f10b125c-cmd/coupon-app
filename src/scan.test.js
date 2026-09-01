@@ -61,6 +61,14 @@ test("既存の鉤括弧パターンも従来どおり読む", () => {
   );
 });
 
+test("翠ジンソーダの先頭が崩れても特徴的な後半表記から復元する", () => {
+  assert.equal(
+    extractProductNameGuess(lines("BYYY =H〈本格濃いめ〉500ml缶 1本無")),
+    "翠ジンソーダ〈本格濃いめ〉500ml缶"
+  );
+  assert.equal(extractProductNameGuess(lines("すいじんそーだ")), "翠ジンソーダ");
+});
+
 test("ローソン券の空白区切り17桁バーコードを検出する", () => {
   const printedNumbers = [
     "8222 0052 4251 5844 4",

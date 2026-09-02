@@ -16,7 +16,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import {
-  scanBarcode,
+  scanBarcodeWithCrop,
   scanText,
   detectStoreFromBarcode,
   extractExpiryDate,
@@ -758,6 +758,9 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
   const [url, setUrl] = useState(coupon.url || "");
   const [imageDataUrl, setImageDataUrl] = useState(coupon.imageDataUrl || null);
   const productImageDataUrl = coupon.productImageDataUrl || null;
+  const [barcodeImageDataUrl, setBarcodeImageDataUrl] = useState(
+    coupon.barcodeImageDataUrl || null
+  );
   const [expiresAt, setExpiresAt] = useState(coupon.expiresAt);
   const [store, setStore] = useState(normalizeStoreKey(coupon.store));
   const [memo, setMemo] = useState(coupon.memo || "");
@@ -777,6 +780,7 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
     reader.onload = () => {
       const dataUrl = reader.result;
       setImageDataUrl(dataUrl);
+      setBarcodeImageDataUrl(null);
       // 画像を選んだ時点で読み取りを始め、手動でボタンを押す手間をなくす。
       // state の反映を待たず、選択した元画像をそのまま解析に渡す。
       autoScan(dataUrl);
@@ -808,7 +812,11 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
     let detectedName = "";
     try {
       setScanMessage("バーコードを解析中…");
-      let barcodeText = await scanBarcode(targetImage);
+      const barcodeResult = await scanBarcodeWithCrop(targetImage);
+      let barcodeText = barcodeResult.text;
+      if (!productImageDataUrl && barcodeResult.barcodeImageDataUrl) {
+        setBarcodeImageDataUrl(barcodeResult.barcodeImageDataUrl);
+      }
 
       setScanMessage("文字を認識中…（初回は時間がかかります）");
       const { text, lines } = await scanText(targetImage, (pct) =>
@@ -899,6 +907,7 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
       url,
       imageDataUrl: finalImage,
       productImageDataUrl,
+      barcodeImageDataUrl,
       sourceType: finalImage ? "screenshot" : url ? "url" : coupon.sourceType,
       expiresAt,
       store,
@@ -929,7 +938,22 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
     setScanning(true);
     setScanMessage("バーコードを解析中…");
     try {
-      let barcodeText = await scanBarcode(coupon.imageDataUrl);
+      const barcodeResult = await scanBarcodeWithCrop(coupon.imageDataUrl);
+      let barcodeText = barcodeResult.text;
+      const detectedBarcodeImage =
+        !coupon.productImageDataUrl && barcodeResult.barcodeImageDataUrl
+          ? barcodeResult.barcodeImageDataUrl
+          : null;
+      if (detectedBarcodeImage) {
+        setBarcodeImageDataUrl(detectedBarcodeImage);
+        // OCRは端末によって1分以上かかるため、切り出せたバーコード画像だけは
+        // 待たずに先に保存して、途中で画面を閉じても結果が残るようにする。
+        onUpdate({
+          ...coupon,
+          barcodeImageDataUrl: detectedBarcodeImage,
+          updatedAt: new Date().toISOString(),
+        });
+      }
       setScanMessage("文字を認識中…（初回は時間がかかります）");
       const { text, lines } = await scanText(coupon.imageDataUrl, (pct) =>
         setScanMessage(`文字を認識中…${pct}%`)
@@ -946,6 +970,10 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
         expiresAt: detectedDate || coupon.expiresAt || "",
         barcode:
           coupon.barcode || (barcodeText && (normalizeBarcode(barcodeText) || barcodeText)) || "",
+        barcodeImageDataUrl:
+          detectedBarcodeImage ||
+          coupon.barcodeImageDataUrl ||
+          null,
         updatedAt: new Date().toISOString(),
       };
       onUpdate(next);
@@ -954,6 +982,7 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
       setStore(next.store);
       setExpiresAt(next.expiresAt);
       setBarcode(next.barcode);
+      setBarcodeImageDataUrl(next.barcodeImageDataUrl);
       const updatedFields = [
         detectedName && `商品名を「${detectedName}」`,
         detectedDate && `期限を「${detectedDate}」`,
@@ -1116,7 +1145,10 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
                     </span>
                   </div>
                   <button
-                    onClick={() => setImageDataUrl(null)}
+                    onClick={() => {
+                      setImageDataUrl(null);
+                      setBarcodeImageDataUrl(null);
+                    }}
                     style={{
                       ...imageActionBtnStyle,
                       flex: 1,
@@ -1160,6 +1192,24 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
                 />
                 <ImageIcon size={20} color={COLORS.line} style={{ marginBottom: 6 }} />
                 <div>タップして画像を追加</div>
+              </div>
+            )}
+            {barcodeImageDataUrl && (
+              <div style={{ marginBottom: 14 }}>
+                <div style={fieldLabel}>切り出したバーコード</div>
+                <img
+                  src={barcodeImageDataUrl}
+                  alt="切り出したバーコード"
+                  style={{
+                    width: "100%",
+                    maxHeight: 150,
+                    objectFit: "contain",
+                    borderRadius: 12,
+                    border: `1px solid ${COLORS.line}`,
+                    display: "block",
+                    background: "#fff",
+                  }}
+                />
               </div>
             )}
             {imageDataUrl && (
@@ -1382,6 +1432,25 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
                   src={coupon.imageDataUrl}
                   alt={coupon.productName}
                   style={{ width: "100%", borderRadius: 12, border: `1px solid ${COLORS.line}`, display: "block" }}
+                />
+              </div>
+            )}
+
+            {barcodeImageDataUrl && (
+              <div style={{ marginBottom: 12 }}>
+                <div style={fieldLabel}>バーコード</div>
+                <img
+                  src={barcodeImageDataUrl}
+                  alt="切り出したバーコード"
+                  style={{
+                    width: "100%",
+                    maxHeight: 170,
+                    objectFit: "contain",
+                    borderRadius: 12,
+                    border: `1px solid ${COLORS.line}`,
+                    display: "block",
+                    background: "#fff",
+                  }}
                 />
               </div>
             )}
@@ -1757,6 +1826,7 @@ export default function CouponApp() {
       sourceType,
       url,
       imageDataUrl,
+      barcodeImageDataUrl: null,
       expiresAt: "",
       store: "",
       barcode: "",
@@ -1778,7 +1848,8 @@ export default function CouponApp() {
         // Firestore保存用の圧縮（1MB制限対策）はバーコードの細い線を潰してしまい
         // 読み取れなくなるため、圧縮する前のオリジナル画像でバーコード・OCRを解析しておく
         try {
-          let barcodeText = await scanBarcode(imageDataUrl);
+          const barcodeResult = await scanBarcodeWithCrop(imageDataUrl);
+          let barcodeText = barcodeResult.text;
           const { text, lines } = await scanText(imageDataUrl);
           // 画像からのバーコード読み取りが失敗した場合、印字されている数字をOCRで拾って代用する
           // （ファミマの28桁のような密なバーコードは画像解像度不足で失敗しやすいため）
@@ -1796,6 +1867,7 @@ export default function CouponApp() {
           toSave = {
             ...toSave,
             barcode: normalizeBarcode(barcodeText) || barcodeText || "",
+            barcodeImageDataUrl: barcodeResult.barcodeImageDataUrl || null,
             store: detectedStore || "",
             expiresAt: detectedDate || "",
             productName: detectedName || "",
@@ -1852,7 +1924,12 @@ export default function CouponApp() {
       (c) =>
         c.inbox &&
         c.imageDataUrl &&
-        (!c.autoScanned || !c.productName || !c.store || !c.expiresAt || !c.barcode)
+        (!c.autoScanned ||
+          !c.productName ||
+          !c.store ||
+          !c.expiresAt ||
+          !c.barcode ||
+          (!c.productImageDataUrl && !c.barcodeImageDataUrl))
     );
     if (!targets.length) {
       notify("再読み取りが必要な未整理クーポンはありません。");
@@ -1870,7 +1947,8 @@ export default function CouponApp() {
     for (let i = 0; i < targets.length; i++) {
       const c = targets[i];
       try {
-        let barcodeText = await scanBarcode(c.imageDataUrl);
+        const barcodeResult = await scanBarcodeWithCrop(c.imageDataUrl);
+        let barcodeText = barcodeResult.text;
         const { text, lines } = await scanText(c.imageDataUrl);
         if (!barcodeText) barcodeText = extractBarcodeNumberGuess(text);
         const detectedStore = detectStoreFromBarcode(barcodeText);
@@ -1893,6 +1971,10 @@ export default function CouponApp() {
           expiresAt: c.expiresAt || detectedDate || "",
           productName: c.productName || detectedName || "",
           barcode: (barcodeText && (normalizeBarcode(barcodeText) || barcodeText)) || c.barcode || "",
+          barcodeImageDataUrl:
+            (!c.productImageDataUrl && barcodeResult.barcodeImageDataUrl) ||
+            c.barcodeImageDataUrl ||
+            null,
           autoScanned: true,
           inbox: canAutoRegister ? false : c.inbox,
           updatedAt: new Date().toISOString(),
@@ -1933,7 +2015,8 @@ export default function CouponApp() {
     for (let i = 0; i < targets.length; i++) {
       const c = targets[i];
       try {
-        let barcodeText = await scanBarcode(c.imageDataUrl);
+        const barcodeResult = await scanBarcodeWithCrop(c.imageDataUrl);
+        let barcodeText = barcodeResult.text;
         const { text, lines } = await scanText(c.imageDataUrl);
         if (!barcodeText) barcodeText = extractBarcodeNumberGuess(text);
         const detectedStore = detectStoreFromBarcode(barcodeText);
@@ -1949,6 +2032,10 @@ export default function CouponApp() {
           store: normalizeStoreKey(c.store) || detectedStore || "",
           expiresAt: detectedDate || c.expiresAt || "",
           barcode: c.barcode || (barcodeText && (normalizeBarcode(barcodeText) || barcodeText)) || "",
+          barcodeImageDataUrl:
+            (!c.productImageDataUrl && barcodeResult.barcodeImageDataUrl) ||
+            c.barcodeImageDataUrl ||
+            null,
           updatedAt: new Date().toISOString(),
         });
       } catch (e) {

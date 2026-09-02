@@ -72,7 +72,191 @@ function makeBandCrops(img) {
   return crops;
 }
 
-export async function scanBarcode(imageDataUrl) {
+// ZXingが返すバーコード両端の座標を使い、レジ提示用にバーコード周辺だけを切り出す。
+// 認識に使った候補画像から直接切り出すため、全体画像・横帯候補のどちらで
+// 読めた場合も同じ処理で対応できる。
+export function calculateBarcodeCropRect(imageWidth, imageHeight, resultPoints) {
+  const points = resultPoints || [];
+  if (points.length < 2) return null;
+  const xs = points
+    .map((point) => (typeof point?.getX === "function" ? point.getX() : point?.x))
+    .filter(Number.isFinite);
+  const ys = points
+    .map((point) => (typeof point?.getY === "function" ? point.getY() : point?.y))
+    .filter(Number.isFinite);
+  if (xs.length < 2 || !ys.length) return null;
+
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const barcodeWidth = maxX - minX;
+  if (barcodeWidth < 16) return null;
+
+  const centerY = ys.reduce((sum, value) => sum + value, 0) / ys.length;
+  const padX = Math.max(16, barcodeWidth * 0.16);
+  const desiredHeight = Math.max(72, barcodeWidth * 0.44);
+  const sourceX = Math.max(0, Math.floor(minX - padX));
+  const sourceWidth = Math.min(imageWidth - sourceX, Math.ceil(barcodeWidth + padX * 2));
+  const sourceY = Math.max(0, Math.floor(centerY - desiredHeight / 2));
+  const sourceHeight = Math.min(imageHeight - sourceY, Math.ceil(desiredHeight));
+  if (sourceWidth < 20 || sourceHeight < 20) return null;
+
+  return { sourceX, sourceY, sourceWidth, sourceHeight };
+}
+
+async function cropBarcodeFromResult(sourceDataUrl, result) {
+  const img = await loadImage(sourceDataUrl);
+  const crop = calculateBarcodeCropRect(img.width, img.height, result?.getResultPoints?.() || []);
+  return canvasCropDataUrl(img, crop);
+}
+
+// バーコード番号をOCRでは読めてもZXingが線の位置を返せない画像向け。
+// 横方向の明暗変化が多い状態が縦に続く帯を探し、その帯を貫く黒い縦線群から
+// バーコード領域を推定する。商品写真や本文の文字列は数行ぶんしか続かないため、
+// 一定の高さにわたって続く縦線群に限定すると誤検出を抑えられる。
+export function detectLinearBarcodeCropRect(imageData) {
+  const { data, width, height } = imageData || {};
+  if (!data || width < 80 || height < 80) return null;
+
+  const luminanceAt = (x, y) => {
+    const offset = (y * width + x) * 4;
+    return (data[offset] * 3 + data[offset + 1] * 4 + data[offset + 2]) / 8;
+  };
+  const rowScores = new Float64Array(height);
+  for (let y = 0; y < height; y++) {
+    let previous = luminanceAt(0, y);
+    let transitions = 0;
+    for (let x = 1; x < width; x++) {
+      const current = luminanceAt(x, y);
+      if (Math.abs(current - previous) >= 72 && Math.min(current, previous) < 145) {
+        transitions++;
+      }
+      previous = current;
+    }
+    rowScores[y] = transitions;
+  }
+
+  // 細い文字1行ではなく、少なくとも画像幅の約2.5%ぶんの高さで
+  // 明暗変化が続く領域を優先する。
+  const sampleHeight = Math.max(8, Math.round(width * 0.025));
+  let rolling = 0;
+  let bestAverage = 0;
+  let bestWindowStart = 0;
+  for (let y = 0; y < height; y++) {
+    rolling += rowScores[y];
+    if (y >= sampleHeight) rolling -= rowScores[y - sampleHeight];
+    if (y >= sampleHeight - 1) {
+      const average = rolling / sampleHeight;
+      if (average > bestAverage) {
+        bestAverage = average;
+        bestWindowStart = y - sampleHeight + 1;
+      }
+    }
+  }
+  if (bestAverage < width * 0.025) return null;
+
+  let anchorY = bestWindowStart;
+  for (let y = bestWindowStart; y < Math.min(height, bestWindowStart + sampleHeight); y++) {
+    if (rowScores[y] > rowScores[anchorY]) anchorY = y;
+  }
+  const rowThreshold = Math.max(width * 0.02, rowScores[anchorY] * 0.42);
+  let bandTop = anchorY;
+  let bandBottom = anchorY;
+  while (bandTop > 0 && rowScores[bandTop - 1] >= rowThreshold) bandTop--;
+  while (bandBottom < height - 1 && rowScores[bandBottom + 1] >= rowThreshold) bandBottom++;
+  const bandHeight = bandBottom - bandTop + 1;
+  if (bandHeight < Math.max(6, Math.round(width * 0.008))) return null;
+
+  const activeColumns = [];
+  for (let x = 0; x < width; x++) {
+    let darkPixels = 0;
+    for (let y = bandTop; y <= bandBottom; y++) {
+      if (luminanceAt(x, y) < 125) darkPixels++;
+    }
+    if (darkPixels / bandHeight >= 0.55) activeColumns.push(x);
+  }
+  if (activeColumns.length < 10) return null;
+
+  const maxGap = Math.max(4, Math.round(width * 0.015));
+  let bestGroup = null;
+  let groupStartIndex = 0;
+  const considerGroup = (endIndex) => {
+    const left = activeColumns[groupStartIndex];
+    const right = activeColumns[endIndex];
+    const groupWidth = right - left + 1;
+    const activeCount = endIndex - groupStartIndex + 1;
+    const density = activeCount / groupWidth;
+    if (groupWidth >= width * 0.12 && density >= 0.14) {
+      const score = groupWidth * density;
+      if (!bestGroup || score > bestGroup.score) bestGroup = { left, right, score };
+    }
+  };
+  for (let i = 1; i < activeColumns.length; i++) {
+    if (activeColumns[i] - activeColumns[i - 1] > maxGap) {
+      considerGroup(i - 1);
+      groupStartIndex = i;
+    }
+  }
+  considerGroup(activeColumns.length - 1);
+  if (!bestGroup) return null;
+
+  const detectedWidth = bestGroup.right - bestGroup.left + 1;
+  const padX = Math.max(12, detectedWidth * 0.12);
+  // 数字行が残る程度の余白に留め、説明文や商品画像は極力含めない。
+  const padY = Math.max(20, bandHeight * 0.6);
+  const sourceX = Math.max(0, Math.floor(bestGroup.left - padX));
+  const sourceY = Math.max(0, Math.floor(bandTop - padY));
+  const sourceWidth = Math.min(
+    width - sourceX,
+    Math.ceil(detectedWidth + padX * 2)
+  );
+  const sourceHeight = Math.min(
+    height - sourceY,
+    Math.ceil(bandHeight + padY * 2)
+  );
+  return { sourceX, sourceY, sourceWidth, sourceHeight };
+}
+
+function canvasCropDataUrl(img, crop) {
+  if (!crop) return null;
+  const { sourceX, sourceY, sourceWidth, sourceHeight } = crop;
+  const scale = Math.min(1, 1200 / sourceWidth);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+  canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+  const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(
+    img,
+    sourceX,
+    sourceY,
+    sourceWidth,
+    sourceHeight,
+    0,
+    0,
+    canvas.width,
+    canvas.height
+  );
+  const png = canvas.toDataURL("image/png");
+  if (png.length <= 180 * 1024) return png;
+  for (const quality of [0.9, 0.8, 0.7, 0.6]) {
+    const jpeg = canvas.toDataURL("image/jpeg", quality);
+    if (jpeg.length <= 180 * 1024) return jpeg;
+  }
+  return canvas.toDataURL("image/jpeg", 0.5);
+}
+
+async function cropBarcodeByVisualDetection(sourceDataUrl) {
+  const img = await loadImage(sourceDataUrl);
+  const canvas = document.createElement("canvas");
+  canvas.width = img.width;
+  canvas.height = img.height;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0);
+  const crop = detectLinearBarcodeCropRect(ctx.getImageData(0, 0, canvas.width, canvas.height));
+  return canvasCropDataUrl(img, crop);
+}
+
+export async function scanBarcodeWithCrop(imageDataUrl) {
   const { BrowserMultiFormatReader } = await import("@zxing/browser");
   const { DecodeHintType } = await import("@zxing/library");
   const hints = new Map();
@@ -101,12 +285,34 @@ export async function scanBarcode(imageDataUrl) {
   for (const src of candidates) {
     try {
       const result = await withTimeout(reader.decodeFromImageUrl(src), 15000, "バーコード解析");
-      if (result) return result.getText();
+      if (result) {
+        let barcodeImageDataUrl = null;
+        try {
+          barcodeImageDataUrl = await cropBarcodeFromResult(src, result);
+          if (!barcodeImageDataUrl) {
+            barcodeImageDataUrl = await cropBarcodeByVisualDetection(src);
+          }
+        } catch (e) {
+          // 切り出しだけ失敗しても、バーコード番号の読み取り結果は返す。
+        }
+        return { text: result.getText(), barcodeImageDataUrl };
+      }
     } catch (e) {
       // この候補では見つからなかった。次の候補へ。
     }
   }
-  return null;
+  let barcodeImageDataUrl = null;
+  try {
+    barcodeImageDataUrl = await cropBarcodeByVisualDetection(baseDataUrl);
+  } catch (e) {
+    // 予備検出に失敗してもOCRによる番号抽出へ進めるよう空で返す。
+  }
+  return { text: null, barcodeImageDataUrl };
+}
+
+export async function scanBarcode(imageDataUrl) {
+  const result = await scanBarcodeWithCrop(imageDataUrl);
+  return result.text;
 }
 
 /* ---------------------------------------------------------

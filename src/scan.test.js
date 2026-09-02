@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  calculateBarcodeCropRect,
+  detectLinearBarcodeCropRect,
   detectStoreFromBarcode,
   extractBarcodeNumberGuess,
   extractExpiryDate,
@@ -16,6 +18,47 @@ function lines(...texts) {
     y1: 24 + index * 18,
   }));
 }
+
+test("検出したバーコード座標へ余白を足して画像内に収まる範囲を作る", () => {
+  assert.deepEqual(
+    calculateBarcodeCropRect(750, 1334, [
+      { x: 180, y: 190 },
+      { x: 570, y: 194 },
+    ]),
+    { sourceX: 117, sourceY: 106, sourceWidth: 515, sourceHeight: 172 }
+  );
+
+  const edgeCrop = calculateBarcodeCropRect(400, 300, [
+    { x: 8, y: 25 },
+    { x: 360, y: 25 },
+  ]);
+  assert.equal(edgeCrop.sourceX, 0);
+  assert.equal(edgeCrop.sourceY, 0);
+  assert.ok(edgeCrop.sourceWidth <= 400);
+  assert.ok(edgeCrop.sourceHeight <= 300);
+});
+
+test("番号を復号できなくても縦線群からバーコード領域を見つける", () => {
+  const width = 400;
+  const height = 300;
+  const data = new Uint8ClampedArray(width * height * 4).fill(255);
+  for (let y = 90; y <= 145; y++) {
+    for (let x = 95; x <= 305; x++) {
+      if (Math.floor((x - 95) / 3) % 2 === 0) {
+        const offset = (y * width + x) * 4;
+        data[offset] = 0;
+        data[offset + 1] = 0;
+        data[offset + 2] = 0;
+      }
+    }
+  }
+
+  const crop = detectLinearBarcodeCropRect({ data, width, height });
+  assert.ok(crop.sourceX < 95);
+  assert.ok(crop.sourceY < 90);
+  assert.ok(crop.sourceX + crop.sourceWidth > 305);
+  assert.ok(crop.sourceY + crop.sourceHeight > 145);
+});
 
 test("ファミマの外部店舗キーを画面の内部キーへ揃える", () => {
   assert.equal(normalizeStoreKey("familymart"), "famima");

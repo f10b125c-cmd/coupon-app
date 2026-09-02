@@ -1004,6 +1004,112 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
     onUpdate({ ...coupon, status: "unused", usedAt: null, updatedAt: new Date().toISOString() });
   }
 
+  // URL取り込みでは imageDataUrl 自体が公式バーコード画像、通常の画像取り込みでは
+  // barcodeImageDataUrl が切り出したバーコード画像になる。表示時は同じ扱いにして、
+  // 必ず商品画像・元の券面より先に置く。
+  const displayedBarcodeImageDataUrl =
+    barcodeImageDataUrl || (productImageDataUrl ? imageDataUrl : null);
+  const displayedCouponImageDataUrl = productImageDataUrl ? null : imageDataUrl;
+
+  const editableCouponImageSection = (
+    <>
+      <div style={fieldLabel}>
+        {productImageDataUrl ? "バーコード画像（任意）" : "クーポン画像（任意）"}
+      </div>
+      {imageDataUrl ? (
+        <div style={{ marginBottom: 14 }}>
+          <img
+            src={imageDataUrl}
+            alt={productImageDataUrl ? "バーコード画像" : "クーポン画像"}
+            style={{
+              width: "100%",
+              maxHeight: 180,
+              objectFit: "contain",
+              borderRadius: 12,
+              border: `1px solid ${COLORS.line}`,
+              display: "block",
+              background: "#FFF9F6",
+            }}
+          />
+          <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+            <div style={{ position: "relative", flex: 1 }}>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleImageFile}
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  width: "100%",
+                  height: "100%",
+                  opacity: 0,
+                  cursor: "pointer",
+                }}
+              />
+              <span
+                style={{
+                  ...imageActionBtnStyle,
+                  display: "block",
+                  textAlign: "center",
+                  boxSizing: "border-box",
+                }}
+              >
+                画像を変更
+              </span>
+            </div>
+            <button
+              onClick={() => {
+                setImageDataUrl(null);
+                setBarcodeImageDataUrl(null);
+              }}
+              style={{
+                ...imageActionBtnStyle,
+                flex: 1,
+                color: "#B8433A",
+                borderColor: "rgba(184,67,58,0.35)",
+              }}
+            >
+              画像を削除
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div
+          style={{
+            position: "relative",
+            width: "100%",
+            padding: "22px 14px",
+            borderRadius: 10,
+            border: `1.5px dashed ${COLORS.line}`,
+            background: "#FFF9F6",
+            color: COLORS.muted,
+            fontFamily: "'M PLUS Rounded 1c', sans-serif",
+            fontSize: 13,
+            textAlign: "center",
+            boxSizing: "border-box",
+            marginBottom: 10,
+          }}
+        >
+          <input
+            type="file"
+            accept="image/*"
+            onChange={handleImageFile}
+            style={{
+              position: "absolute",
+              inset: 0,
+              width: "100%",
+              height: "100%",
+              opacity: 0,
+              cursor: "pointer",
+            }}
+          />
+          <ImageIcon size={20} color={COLORS.line} style={{ marginBottom: 6 }} />
+          <div>タップして画像を追加</div>
+        </div>
+      )}
+    </>
+  );
+
   return (
     <div
       style={{
@@ -1084,116 +1190,6 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
 
         {editing ? (
           <>
-            {productImageDataUrl && (
-              <div style={{ marginBottom: 14 }}>
-                <div style={fieldLabel}>商品画像</div>
-                <img
-                  src={productImageDataUrl}
-                  alt={coupon.productName || "商品画像"}
-                  style={{
-                    width: "100%",
-                    maxHeight: 180,
-                    objectFit: "contain",
-                    borderRadius: 12,
-                    border: `1px solid ${COLORS.line}`,
-                    display: "block",
-                    background: "#FFF9F6",
-                  }}
-                />
-              </div>
-            )}
-            <div style={fieldLabel}>クーポン画像（任意）</div>
-            {imageDataUrl ? (
-              <div style={{ marginBottom: 14 }}>
-                <img
-                  src={imageDataUrl}
-                  alt="クーポン画像"
-                  style={{
-                    width: "100%",
-                    maxHeight: 180,
-                    objectFit: "contain",
-                    borderRadius: 12,
-                    border: `1px solid ${COLORS.line}`,
-                    display: "block",
-                    background: "#FFF9F6",
-                  }}
-                />
-                <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
-                  <div style={{ position: "relative", flex: 1 }}>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleImageFile}
-                      style={{
-                        position: "absolute",
-                        inset: 0,
-                        width: "100%",
-                        height: "100%",
-                        opacity: 0,
-                        cursor: "pointer",
-                      }}
-                    />
-                    <span
-                      style={{
-                        ...imageActionBtnStyle,
-                        display: "block",
-                        textAlign: "center",
-                        boxSizing: "border-box",
-                      }}
-                    >
-                      画像を変更
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => {
-                      setImageDataUrl(null);
-                      setBarcodeImageDataUrl(null);
-                    }}
-                    style={{
-                      ...imageActionBtnStyle,
-                      flex: 1,
-                      color: "#B8433A",
-                      borderColor: "rgba(184,67,58,0.35)",
-                    }}
-                  >
-                    画像を削除
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div
-                style={{
-                  position: "relative",
-                  width: "100%",
-                  padding: "22px 14px",
-                  borderRadius: 10,
-                  border: `1.5px dashed ${COLORS.line}`,
-                  background: "#FFF9F6",
-                  color: COLORS.muted,
-                  fontFamily: "'M PLUS Rounded 1c', sans-serif",
-                  fontSize: 13,
-                  textAlign: "center",
-                  boxSizing: "border-box",
-                  marginBottom: 10,
-                }}
-              >
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleImageFile}
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    width: "100%",
-                    height: "100%",
-                    opacity: 0,
-                    cursor: "pointer",
-                  }}
-                />
-                <ImageIcon size={20} color={COLORS.line} style={{ marginBottom: 6 }} />
-                <div>タップして画像を追加</div>
-              </div>
-            )}
             {barcodeImageDataUrl && (
               <div style={{ marginBottom: 14 }}>
                 <div style={fieldLabel}>切り出したバーコード</div>
@@ -1212,6 +1208,26 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
                 />
               </div>
             )}
+            {productImageDataUrl && editableCouponImageSection}
+            {productImageDataUrl && (
+              <div style={{ marginBottom: 14 }}>
+                <div style={fieldLabel}>商品画像</div>
+                <img
+                  src={productImageDataUrl}
+                  alt={coupon.productName || "商品画像"}
+                  style={{
+                    width: "100%",
+                    maxHeight: 180,
+                    objectFit: "contain",
+                    borderRadius: 12,
+                    border: `1px solid ${COLORS.line}`,
+                    display: "block",
+                    background: "#FFF9F6",
+                  }}
+                />
+              </div>
+            )}
+            {!productImageDataUrl && editableCouponImageSection}
             {imageDataUrl && (
               <div style={{ marginBottom: 14 }}>
                 <button
@@ -1369,8 +1385,27 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
           </>
         ) : (
           <>
+            {displayedBarcodeImageDataUrl && (
+              <div style={{ marginBottom: 12 }}>
+                <div style={fieldLabel}>バーコード</div>
+                <img
+                  src={displayedBarcodeImageDataUrl}
+                  alt="バーコード"
+                  style={{
+                    width: "100%",
+                    maxHeight: 170,
+                    objectFit: "contain",
+                    borderRadius: 12,
+                    border: `1px solid ${COLORS.line}`,
+                    display: "block",
+                    background: "#fff",
+                  }}
+                />
+              </div>
+            )}
             {coupon.productImageDataUrl && (
               <div style={{ marginBottom: 12 }}>
+                <div style={fieldLabel}>商品画像</div>
                 <img
                   src={coupon.productImageDataUrl}
                   alt={coupon.productName || "商品画像"}
@@ -1426,31 +1461,12 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
               </div>
             )}
 
-            {coupon.imageDataUrl && (
+            {displayedCouponImageDataUrl && (
               <div style={{ marginBottom: 12 }}>
                 <img
-                  src={coupon.imageDataUrl}
+                  src={displayedCouponImageDataUrl}
                   alt={coupon.productName}
                   style={{ width: "100%", borderRadius: 12, border: `1px solid ${COLORS.line}`, display: "block" }}
-                />
-              </div>
-            )}
-
-            {barcodeImageDataUrl && (
-              <div style={{ marginBottom: 12 }}>
-                <div style={fieldLabel}>バーコード</div>
-                <img
-                  src={barcodeImageDataUrl}
-                  alt="切り出したバーコード"
-                  style={{
-                    width: "100%",
-                    maxHeight: 170,
-                    objectFit: "contain",
-                    borderRadius: 12,
-                    border: `1px solid ${COLORS.line}`,
-                    display: "block",
-                    background: "#fff",
-                  }}
                 />
               </div>
             )}

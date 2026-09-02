@@ -60,6 +60,26 @@ test("番号を復号できなくても縦線群からバーコード領域を�
   assert.ok(crop.sourceY + crop.sourceHeight > 145);
 });
 
+test("横長でも黒白の反復がない文字帯はバーコードにしない", () => {
+  const width = 400;
+  const height = 300;
+  const data = new Uint8ClampedArray(width * height * 4).fill(255);
+  // 暗い帯に数本だけ明るい矩形がある状態を、期限バナーの文字として模擬する。
+  for (let y = 100; y <= 140; y++) {
+    for (let x = 60; x <= 340; x++) {
+      const lightLetter = [100, 145, 190, 235, 280].some(
+        (start) => x >= start && x < start + 12
+      );
+      const value = lightLetter ? 255 : 80;
+      const offset = (y * width + x) * 4;
+      data[offset] = value;
+      data[offset + 1] = value;
+      data[offset + 2] = value;
+    }
+  }
+  assert.equal(detectLinearBarcodeCropRect({ data, width, height }), null);
+});
+
 test("ファミマの外部店舗キーを画面の内部キーへ揃える", () => {
   assert.equal(normalizeStoreKey("familymart"), "famima");
   assert.equal(normalizeStoreKey("famima"), "famima");

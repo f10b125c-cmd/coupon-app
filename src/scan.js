@@ -135,70 +135,99 @@ export function detectLinearBarcodeCropRect(imageData) {
     rowScores[y] = transitions;
   }
 
-  // 細い文字1行ではなく、少なくとも画像幅の約2.5%ぶんの高さで
-  // 明暗変化が続く領域を優先する。
+  // 細い文字1行ではなく、画像幅の約2.5%ぶんの高さで明暗変化が
+  // 続く領域を調べる。商品写真の模様が最も強い画像もあるため、
+  // 最強の1か所だけでなく画像全体の候補帯を比較する。
   const sampleHeight = Math.max(8, Math.round(width * 0.025));
-  let rolling = 0;
-  let bestAverage = 0;
-  let bestWindowStart = 0;
-  for (let y = 0; y < height; y++) {
-    rolling += rowScores[y];
-    if (y >= sampleHeight) rolling -= rowScores[y - sampleHeight];
-    if (y >= sampleHeight - 1) {
-      const average = rolling / sampleHeight;
-      if (average > bestAverage) {
-        bestAverage = average;
-        bestWindowStart = y - sampleHeight + 1;
+  const windowStep = Math.max(4, Math.floor(sampleHeight / 2));
+  const windowCandidates = [];
+  for (let start = 0; start + sampleHeight <= height; start += windowStep) {
+    let total = 0;
+    for (let y = start; y < start + sampleHeight; y++) total += rowScores[y];
+    const average = total / sampleHeight;
+    if (average >= width * 0.015) {
+      windowCandidates.push({ start, average });
+    }
+  }
+  if (!windowCandidates.length) return null;
+
+  // 商品ロゴや端末上部の文字は細い帯にしか現れない。バーコードの線が
+  // 画像幅に対して一定以上の高さで続く候補だけを採用する。
+  const minBandHeight = Math.max(10, Math.round(width * 0.07));
+  const maxBandHeight = Math.round(width * 0.28);
+  // Code128等では太い白バーが画像幅の2%前後になることがある。
+  // 文字帯は高さ条件・反復回数でも除外するため、線群を分断しない範囲まで許容する。
+  const maxGap = Math.max(4, Math.round(width * 0.035));
+  let bestCandidate = null;
+
+  for (const windowCandidate of windowCandidates) {
+    let anchorY = windowCandidate.start;
+    for (let y = windowCandidate.start; y < windowCandidate.start + sampleHeight; y++) {
+      if (rowScores[y] > rowScores[anchorY]) anchorY = y;
+    }
+    const rowThreshold = Math.max(width * 0.02, rowScores[anchorY] * 0.42);
+    let bandTop = anchorY;
+    let bandBottom = anchorY;
+    while (bandTop > 0 && rowScores[bandTop - 1] >= rowThreshold) bandTop--;
+    while (bandBottom < height - 1 && rowScores[bandBottom + 1] >= rowThreshold) bandBottom++;
+    const bandHeight = bandBottom - bandTop + 1;
+    if (bandHeight < minBandHeight || bandHeight > maxBandHeight) continue;
+
+    const activeColumns = [];
+    const activeState = new Uint8Array(width);
+    for (let x = 0; x < width; x++) {
+      let darkPixels = 0;
+      for (let y = bandTop; y <= bandBottom; y++) {
+        if (luminanceAt(x, y) < 125) darkPixels++;
+      }
+      if (darkPixels / bandHeight >= 0.55) {
+        activeColumns.push(x);
+        activeState[x] = 1;
       }
     }
-  }
-  if (bestAverage < width * 0.025) return null;
+    if (activeColumns.length < 10) continue;
 
-  let anchorY = bestWindowStart;
-  for (let y = bestWindowStart; y < Math.min(height, bestWindowStart + sampleHeight); y++) {
-    if (rowScores[y] > rowScores[anchorY]) anchorY = y;
-  }
-  const rowThreshold = Math.max(width * 0.02, rowScores[anchorY] * 0.42);
-  let bandTop = anchorY;
-  let bandBottom = anchorY;
-  while (bandTop > 0 && rowScores[bandTop - 1] >= rowThreshold) bandTop--;
-  while (bandBottom < height - 1 && rowScores[bandBottom + 1] >= rowThreshold) bandBottom++;
-  const bandHeight = bandBottom - bandTop + 1;
-  if (bandHeight < Math.max(6, Math.round(width * 0.008))) return null;
-
-  const activeColumns = [];
-  for (let x = 0; x < width; x++) {
-    let darkPixels = 0;
-    for (let y = bandTop; y <= bandBottom; y++) {
-      if (luminanceAt(x, y) < 125) darkPixels++;
+    let bestGroup = null;
+    let groupStartIndex = 0;
+    const considerGroup = (endIndex) => {
+      const left = activeColumns[groupStartIndex];
+      const right = activeColumns[endIndex];
+      const groupWidth = right - left + 1;
+      const activeCount = endIndex - groupStartIndex + 1;
+      const density = activeCount / groupWidth;
+      let transitions = 0;
+      for (let x = left + 1; x <= right; x++) {
+        if (activeState[x] !== activeState[x - 1]) transitions++;
+      }
+      const minTransitions = Math.max(16, Math.round(groupWidth * 0.08));
+      // 赤い期限帯や端末のステータスバーは横長でもほぼ一色。
+      // バーコードのように黒白が細かく交互に並ぶ候補だけを残す。
+      if (
+        groupWidth >= width * 0.12 &&
+        density >= 0.14 &&
+        transitions >= minTransitions
+      ) {
+        const score = groupWidth * density * transitions;
+        if (!bestGroup || score > bestGroup.score) bestGroup = { left, right, score };
+      }
+    };
+    for (let i = 1; i < activeColumns.length; i++) {
+      if (activeColumns[i] - activeColumns[i - 1] > maxGap) {
+        considerGroup(i - 1);
+        groupStartIndex = i;
+      }
     }
-    if (darkPixels / bandHeight >= 0.55) activeColumns.push(x);
-  }
-  if (activeColumns.length < 10) return null;
+    considerGroup(activeColumns.length - 1);
+    if (!bestGroup) continue;
 
-  const maxGap = Math.max(4, Math.round(width * 0.015));
-  let bestGroup = null;
-  let groupStartIndex = 0;
-  const considerGroup = (endIndex) => {
-    const left = activeColumns[groupStartIndex];
-    const right = activeColumns[endIndex];
-    const groupWidth = right - left + 1;
-    const activeCount = endIndex - groupStartIndex + 1;
-    const density = activeCount / groupWidth;
-    if (groupWidth >= width * 0.12 && density >= 0.14) {
-      const score = groupWidth * density;
-      if (!bestGroup || score > bestGroup.score) bestGroup = { left, right, score };
-    }
-  };
-  for (let i = 1; i < activeColumns.length; i++) {
-    if (activeColumns[i] - activeColumns[i - 1] > maxGap) {
-      considerGroup(i - 1);
-      groupStartIndex = i;
+    const candidateScore = bestGroup.score * bandHeight * windowCandidate.average;
+    if (!bestCandidate || candidateScore > bestCandidate.score) {
+      bestCandidate = { bandTop, bandHeight, bestGroup, score: candidateScore };
     }
   }
-  considerGroup(activeColumns.length - 1);
-  if (!bestGroup) return null;
+  if (!bestCandidate) return null;
 
+  const { bandTop, bandHeight, bestGroup } = bestCandidate;
   const detectedWidth = bestGroup.right - bestGroup.left + 1;
   const padX = Math.max(12, detectedWidth * 0.12);
   // 数字行が残る程度の余白に留め、説明文や商品画像は極力含めない。

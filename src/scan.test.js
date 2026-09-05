@@ -143,11 +143,47 @@ test("プレモルの実画像で、ロゴより商品名2行と容量の段落�
     { text: "350ml 缶", y: 1284, y1: 1312 },
     { text: "いずれ か 1 本 無料 引換 え ク ー ポ ン", y: 1358, y1: 1387 },
   ];
-  const expected = "ザ・プレミアム・モルツ／ザ・プレミアム・モルツ 夕映香るエール 350ml缶";
+  const expected = "ザ・プレミアム・モルツ／ザ・プレミアム・モルツ〈ジャパニーズエール〉夕映香るエール 350ml缶";
   assert.equal(extractProductNameGuess(productLines), expected);
   assert.equal(extractProductNameGuess(productLines.map(line => ({
     ...line, text: line.text.replace("夕映 舌", "夕映 香"),
   }))), expected);
+});
+
+test("ジャパニーズエールの途中で改行された選択券も商品名全体で読む", () => {
+  const expected = "ザ・プレミアム・モルツ／ザ・プレミアム・モルツ〈ジャパニーズエール〉夕映香るエール 350ml缶";
+  for (const [first, second] of [
+    ["〈ジ", "ャパニーズエール〉夕映香るエール 350ml和缶 1本無料引"],
+    ["〈", "ヤャパニーズエール〉夕映香るエール 350ml缶 1本無料引"],
+    ["〈ジャ", "パニーズエール〉夕映舌るエール 350ml缶 1本無料引換え"],
+  ]) {
+    assert.equal(extractProductNameGuess(lines(
+      `ザ・プレミアム・モルツ/ザ・プレミアム・モルツ ${first}`,
+      second,
+    )), expected);
+  }
+});
+
+test("プレモル選択券の専用補正を別商品・別容量・離れた段落へ使わない", () => {
+  for (const texts of [
+    ["ザ・プレミアム・モルツ／", "ザ・プレミアム・モルツ香るエール", "350ml缶"],
+    ["ザ・プレミアム・モルツ／", "ザ・プレミアム・モルツ夕映香るエール", "500ml缶"],
+    ["ジャパニーズエール"],
+    ["夕映香るエール 350ml缶"],
+  ]) {
+    assert.ok(!extractProductNameGuess(lines(...texts)).includes("モルツ〈ジャパニーズエール〉夕映香るエール 350ml缶"));
+  }
+  assert.notEqual(extractProductNameGuess([
+    {text: "ザ・プレミアム・モルツ／", y: 0, y1: 20},
+    {text: "ザ・プレミアム・モルツ夕映香るエール350ml缶", y: 300, y1: 320},
+  ]), "ザ・プレミアム・モルツ／ザ・プレミアム・モルツ〈ジャパニーズエール〉夕映香るエール 350ml缶");
+});
+
+test("実画像で〈ジャが(Jvになっても、下部説明2行を照合して復元する", () => {
+  assert.equal(extractProductNameGuess([
+    {text: "ザ ・ プ レミ アム ・ モ ルツ / ザ ・ プ レミ アム ・ モ ルツ (Jv", y: 1393, y1: 1414},
+    {text: "パニ ー ズ エー ル 〉 夕映 香る エー ル 350ml 缶 1 本 無料 引換 え", y: 1426, y1: 1447},
+  ]), "ザ・プレミアム・モルツ／ザ・プレミアム・モルツ〈ジャパニーズエール〉夕映香るエール 350ml缶");
 });
 
 test("容量が別行の商品段落を読むが、ロゴの断片だけでは商品名を作らない", () => {

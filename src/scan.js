@@ -991,6 +991,7 @@ function findLineBelowLargestGap(lines) {
 // これまでどおり読めたうえで、缶のロゴ誤読などは前段で先に弾ける。
 export function extractProductNameGuess(lines) {
   const guessed =
+    extractJapaneseAleExchangeProduct(lines) ||
     extractMultilineExchangeProduct(lines) ||
     guessProductName(lines, true) ||
     guessProductName(lines, false);
@@ -999,6 +1000,32 @@ export function extractProductNameGuess(lines) {
   if (/[=|｜]/.test(guessed) && !hasEnoughNameChars(guessed, true) &&
       !PRODUCT_UNIT_PATTERN.test(guessed)) return "";
   return normalizeKnownProductName(guessed);
+}
+
+// この2種選択券の画像内キャプションにはシリーズ名が省略され、下部説明には
+// 「〈ジ／ャパニーズエール〉」のように改行されている。単位を含む後半の行だけを
+// 採用せず、近接する全文を照合する独立パターン。2商品のブランド名・夕映・350ml
+// がすべて一致するときだけ、実券の下部説明で確認した完全な表記へ揃える。
+function extractJapaneseAleExchangeProduct(lines) {
+  if (!lines?.length) return "";
+  // 「〈ジャ」が「(Jv」になる崩れも、この券のブラウザOCRで確認済み。
+  const pattern = /^ザ・プレミアム・モルツ[/／]ザ・プレミアム・モルツ(?:(?:〈?(?:ジャ|ヤャ|ャ)?|\(Jv)パニーズエール〉?)?夕映[香舌]るエール350ml(?:和)?缶(?:いずれか)?(?:1本(?:無料(?:引(?:き?換え?(?:クーポン)?)?)?)?)?$/i;
+  for (let start = 0; start < lines.length; start++) {
+    let paragraph = "";
+    for (let end = start; end < lines.length && end < start + 4; end++) {
+      if (end > start) {
+        const above = lines[end - 1];
+        const height = Math.max(1, (above.y1 || above.y) - above.y);
+        const gap = lines[end].y - (above.y1 || above.y);
+        if (gap < 0 || gap > height * 2.2) break;
+      }
+      paragraph += tidySpacing(lines[end].text || "").replace(/\s+/g, "");
+      if (pattern.test(paragraph)) {
+        return "ザ・プレミアム・モルツ／ザ・プレミアム・モルツ〈ジャパニーズエール〉夕映香るエール 350ml缶";
+      }
+    }
+  }
+  return "";
 }
 
 // セブン等の「商品名（複数行）→容量だけの行→いずれか1本無料引換えクーポン」。

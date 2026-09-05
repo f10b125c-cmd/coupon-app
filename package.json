@@ -9,6 +9,7 @@
     "test": "node --test src/scan.test.js api/_lib/lineUrl.test.js",
     "preview": "vite preview",
     "e2e": "playwright test",
+    "e2e:offline": "playwright test --config playwright.offline.config.js",
     "e2e:prod": "E2E_BASE_URL=https://coupon-app-dusky.vercel.app playwright test"
   },
   "dependencies": {

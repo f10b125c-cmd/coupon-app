@@ -21,6 +21,7 @@ import {
   detectStoreFromBarcode,
   extractExpiryDate,
   extractProductNameGuess,
+  extractProductNameForRescan,
   extractBarcodeNumberGuess,
   normalizeStoreKey,
 } from "./scan.js";
@@ -961,7 +962,7 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
       if (!barcodeText) barcodeText = extractBarcodeNumberGuess(text);
       const detectedStore = detectStoreFromBarcode(barcodeText);
       const detectedDate = extractExpiryDate(text);
-      const detectedName = extractProductNameGuess(lines);
+      const detectedName = extractProductNameForRescan(lines, coupon.productName || "");
 
       const next = {
         ...coupon,
@@ -988,9 +989,8 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
         detectedDate && `期限を「${detectedDate}」`,
       ].filter(Boolean);
       setScanMessage(
-        updatedFields.length
-          ? `${updatedFields.join("、")}に更新しました。`
-          : "商品名と期限を読み取れませんでした。鉛筆マークから手入力してください。"
+        (updatedFields.length ? `${updatedFields.join("、")}に更新しました。` : "") +
+        (!detectedName ? "商品名は確実に読み取れなかったため、現在の商品名を保持しました。" : "")
       );
     } catch (e) {
       console.error("[rescanAndOverwrite] 読み取りに失敗しました", e);
@@ -2037,7 +2037,7 @@ export default function CouponApp() {
         if (!barcodeText) barcodeText = extractBarcodeNumberGuess(text);
         const detectedStore = detectStoreFromBarcode(barcodeText);
         const detectedDate = extractExpiryDate(text);
-        const detectedName = extractProductNameGuess(lines);
+        const detectedName = extractProductNameForRescan(lines, c.productName || "");
 
         if (detectedName) nameCount++;
         if (detectedDate) dateCount++;

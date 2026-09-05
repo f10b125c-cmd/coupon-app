@@ -502,9 +502,11 @@ export async function scanText(imageDataUrl, onProgress) {
   let normalTarget = imageDataUrl;
   let invertedTarget = null;
   let deadlineTargets = [];
+  let normalCanvas = null;
   try {
     const img = await loadImage(imageDataUrl);
     const canvas = toBoundedCanvas(img, 2000);
+    normalCanvas = canvas;
     // 保存済みの画像はすでにJPEG圧縮されている。ここでさらにJPEGへ再エンコードすると
     // 圧縮ノイズが二重にかかって細い文字が潰れるうえ、JPEGの出力は端末ごとに違うため
     // 同じ画像でも端末によってOCR結果が変わってしまう。可逆なPNGにして差をなくす。
@@ -558,6 +560,50 @@ export async function scanText(imageDataUrl, onProgress) {
     }
 
     lines.sort((a, b) => a.y - b.y);
+    let productCropRecovered = false;
+    // 商品名が弱い候補しかない場合だけ、容量・引換文の直前にある商品名段落を
+    // 拡大して再読する。画面全体のOCRや、他店舗の抽出パターンは置き換えない。
+    if (normalCanvas && extractProductNameReading(lines).confidence !== "high") {
+      const crop = findProductNameRetryRect(lines, normalCanvas.width, normalCanvas.height);
+      if (crop) {
+        try {
+          const canvas = document.createElement("canvas");
+          const scale = Math.min(3, 2000 / crop.width);
+          canvas.width = Math.round(crop.width * scale);
+          canvas.height = Math.round(crop.height * scale);
+          const ctx = canvas.getContext("2d");
+          ctx.imageSmoothingEnabled = false;
+          ctx.drawImage(normalCanvas, crop.x, crop.y, crop.width, crop.height,
+            0, 0, canvas.width, canvas.height);
+          // 同じ拡大画像でもjpn+engは「缶」を「{&」と読む実例がある。
+          // この日本語商品名段落だけ日本語モデルに切り替えて読み直す。
+          await withTimeout(worker.reinitialize("jpn"), 45000, "商品名の日本語認識準備");
+          const { data: cropData } = await withTimeout(worker.recognize(
+            canvas.toDataURL("image/png"),
+            { tessedit_pageseg_mode: PSM.SINGLE_BLOCK },
+            { text: true, blocks: true }
+          ), 45000, "商品名部分の文字認識");
+          const cropLines = extractLines(cropData).map(line => ({
+            ...line, y: crop.y + line.y / scale, y1: crop.y + line.y1 / scale,
+          }));
+          const retried = [
+            ...lines.filter(line => (line.y1 || line.y) <= crop.y || line.y >= crop.y + crop.height),
+            ...cropLines,
+          ].sort((a, b) => a.y - b.y);
+          if (extractProductNameReading(retried).confidence === "high") {
+            lines = retried;
+            productCropRecovered = true;
+          }
+        } catch (e) {
+          // 再読が失敗しても元のOCRを使い、保存済み商品名を消さない。
+        } finally {
+          // 後段の既存期限OCRへ認識言語の変更を持ち越さない。
+          try {
+            await withTimeout(worker.reinitialize("jpn+eng"), 45000, "通常認識への復帰");
+          } catch (e) { /* 元の全文・期限抽出は引き続き利用できる */ }
+        }
+      }
+    }
     const fullText = lines.map((l) => l.text).join("\n");
     let deadlineText = "";
     // 全体OCRですでに期限を取得できた画像は追加処理を省き、モバイルの負荷を抑える。
@@ -592,6 +638,7 @@ export async function scanText(imageDataUrl, onProgress) {
     return {
       text: [fullText, deadlineText].filter(Boolean).join("\n"),
       lines,
+      productCropRecovered,
     };
   } finally {
     await worker.terminate();
@@ -990,16 +1037,76 @@ function findLineBelowLargestGap(lines) {
 // 取りこぼす恐れがある。緩い判定を後段に残しておけば、従来読めていたものは
 // これまでどおり読めたうえで、缶のロゴ誤読などは前段で先に弾ける。
 export function extractProductNameGuess(lines) {
-  const guessed =
-    extractJapaneseAleExchangeProduct(lines) ||
-    extractMultilineExchangeProduct(lines) ||
-    guessProductName(lines, true) ||
-    guessProductName(lines, false);
+  return extractProductNameReading(lines).name;
+}
+
+// 抽出と保存の境界にも保護を置く。英字だけの弱いフォールバックは新規候補には
+// 残すが、個別・選択再読では非空の既存名を別の弱い候補へ上書きしない。
+export function extractProductNameForRescan(lines, existingName = "") {
+  const reading = extractProductNameReading(lines);
+  if (reading.confidence !== "high" && existingName.trim() && reading.name !== existingName.trim()) return "";
+  return reading.name;
+}
+
+function isScreenshotChromeText(value) {
+  const text = tidySpacing(value || "");
+  const compact = text.replace(/\s+/g, "");
+  const carrier = /docomo|dokcomo|softbank|rakuten|^au(?:\W|\d|[ぁ-んァ-ヶ一-龠])/i.test(compact);
+  const clock = /\d{1,2}[:：]\d{2}/.test(text);
+  const signal = /\d+\s*[%％]|[345５４]G|LTE|wi-?fi/i.test(text);
+  if ((carrier && (clock || signal || !hasEnoughNameChars(text, true))) || (clock && signal)) return true;
+  return /https?:\/\/|\bwww\.|\b[a-z0-9-]+\.(?:co\.jp|com|jp|net|org)(?:\b|\/)/i.test(text);
+}
+
+function extractProductNameReading(lines) {
+  const eligible = (lines || []).filter(line => !isScreenshotChromeText(line.text));
+  const structured = extractJapaneseAleExchangeProduct(eligible) || extractMultilineExchangeProduct(eligible);
+  const guessed = structured || guessProductName(eligible, true) || guessProductName(eligible, false);
+  const empty = { name: "", confidence: "none" };
+  if (!guessed || isScreenshotChromeText(guessed)) return empty;
   // 英字を許す従来のフォールバックでも、等号・縦棒を含むロゴの断片は採用しない。
   // 「g ry =」を特定商品へ置換せず、商品名の根拠がない場合は読み取り失敗にする。
   if (/[=|｜]/.test(guessed) && !hasEnoughNameChars(guessed, true) &&
-      !PRODUCT_UNIT_PATTERN.test(guessed)) return "";
-  return normalizeKnownProductName(guessed);
+      !PRODUCT_UNIT_PATTERN.test(guessed)) return empty;
+  const name = normalizeKnownProductName(guessed);
+  const anchored = eligible.some(line => {
+    const text = tidySpacing(line.text || "");
+    return text.includes(tidySpacing(guessed)) && (PRICE_PATTERN.test(text) || /「.+」|無料.*引き?換え?/.test(text));
+  });
+  const strong = structured || name !== guessed || anchored ||
+    (hasEnoughNameChars(name, true) && /\d+\s*(?:ml|ｍｌ|g|個|本|枚|袋|杯)/i.test(name));
+  return { name, confidence: strong ? "high" : "low" };
+}
+
+// 「350ml &」のように容器名が崩れていても、容量だけを手がかりに再読範囲を
+// 決められる。&を缶へ直接置換せず、画像から文字を読み直すためだけに使う。
+export function findProductNameRetryRect(lines, width, height) {
+  if (!(width > 0 && height > 0)) return null;
+  for (let i = 2; i < (lines || []).length; i++) {
+    const exchange = tidySpacing(lines[i].text || "");
+    if (!/^(?:いずれか)?\s*\d+\s*(?:本|個|缶|袋)\s*無料\s*引き?換え?\s*クーポン/.test(exchange)) continue;
+    if (lines[i].y < height * 0.2) continue;
+    const volume = tidySpacing(lines[i - 1].text || "");
+    if (!/^\d+(?:\.\d+)?\s*(?:ml|ｍｌ|g)(?:\s*[^0-9]{0,8})$/i.test(volume)) continue;
+    const volumeHeight = Math.max(1, (lines[i - 1].y1 || lines[i - 1].y) - lines[i - 1].y);
+    const exchangeGap = lines[i].y - (lines[i - 1].y1 || lines[i - 1].y);
+    if (exchangeGap < 0 || exchangeGap > volumeHeight * 2.2) continue;
+    let start = i - 1;
+    for (let k = i - 2; k >= Math.max(0, i - 4); k--) {
+      const above = lines[k];
+      const gap = lines[k + 1].y - (above.y1 || above.y);
+      const lineHeight = Math.max(1, (above.y1 || above.y) - above.y);
+      if (gap < 0 || gap > lineHeight * 2.2 || isScreenshotChromeText(above.text)) break;
+      if (!cleanProductLine(above.text || "", true)) break;
+      start = k;
+    }
+    if (start === i - 1) continue;
+    const padding = Math.max(4, ((lines[start].y1 || lines[start].y) - lines[start].y) * 0.5);
+    const y = Math.max(0, Math.floor(lines[start].y - padding));
+    const bottom = Math.min(height, lines[i].y - 1, Math.ceil(lines[i - 1].y1 + padding));
+    if (bottom > y) return { x: 0, y, width, height: bottom - y };
+  }
+  return null;
 }
 
 // この2種選択券の画像内キャプションにはシリーズ名が省略され、下部説明には

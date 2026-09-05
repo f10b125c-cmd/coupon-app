@@ -8,6 +8,8 @@ import {
   extractBarcodeNumberGuess,
   extractExpiryDate,
   extractProductNameGuess,
+  extractProductNameForRescan,
+  findProductNameRetryRect,
   normalizeStoreKey,
 } from "./scan.js";
 
@@ -195,6 +197,44 @@ test("容量が別行の商品段落を読むが、ロゴの断片だけでは�
   assert.equal(extractProductNameGuess(lines("g ry =", "350ml 缶", "いずれか1本無料引換えクーポン")), "");
   assert.equal(extractProductNameGuess(lines("Red Bull")), "Red Bull");
   assert.equal(extractProductNameGuess(lines("「Coca-Cola」無料引換券")), "Coca-Cola");
+});
+
+test("端末ステータスやURLを商品名に採用しない", () => {
+  for (const status of [
+    "ul docomo 会 11:50 1¢@45%@)", "ul dokcomo会", "all docomo会 1:20 @ 77% «a»",
+    "SoftBank 10:21 4G 80%", "10:21 LTE 80%", "Vv Q coupon.sej.co.jp X",
+  ]) {
+    assert.equal(extractProductNameGuess(lines(status)), "");
+  }
+  assert.equal(extractProductNameGuess(lines("ul dokcomo会", "Red Bull")), "Red Bull");
+});
+
+test("再読は弱いロゴ断片で既存名を壊さず、確実な商品名だけ上書きする", () => {
+  const existing = "ザ・プレミアム・モルツ";
+  assert.equal(extractProductNameForRescan(lines("ul docomo 会 11:50 1¢@45%@)"), existing), "");
+  assert.equal(extractProductNameForRescan(lines("テー pis -"), existing), "");
+  assert.equal(extractProductNameForRescan([], existing), "");
+  assert.equal(extractProductNameForRescan(lines("Red Bull"), existing), "");
+  assert.equal(extractProductNameForRescan(lines("Red Bull"), ""), "Red Bull");
+  assert.equal(extractProductNameForRescan(lines("Red Bull"), "Red Bull"), "Red Bull");
+  assert.equal(extractProductNameForRescan(lines("「Coca-Cola」無料引換券"), existing), "Coca-Cola");
+  assert.equal(extractProductNameForRescan(lines("レモンスカッシュ 250ml缶"), existing), "レモンスカッシュ 250ml缶");
+});
+
+test("缶を&と誤読した実画像では、商品名段落だけを拡大再読する", () => {
+  const actual = [
+    {text:"ul docomo 会 11:50 1¢@45%@)",y:8,y1:31},
+    {text:"Be",y:712,y1:770},
+    {text:"ザ ・ プ レミ アム ・ モ ルツ /",y:794,y1:815},
+    {text:"ザ ・ プ レミ アム ・ モ ルツ 夕映 香る エー ル",y:823,y1:843},
+    {text:"350ml &",y:853,y1:872},
+    {text:"いずれ か 1 本 無料 引換 え ク ー ポ ン",y:904,y1:927},
+  ];
+  assert.deepEqual(findProductNameRetryRect(actual,750,1334), {x:0,y:783,width:750,height:100});
+  assert.equal(extractProductNameForRescan(actual,"プレモル"), "");
+  assert.equal(findProductNameRetryRect(actual.map(line => line.y === 904 ? {...line,y:1200,y1:1223}:line),750,1334),null);
+  assert.equal(findProductNameRetryRect(lines("ul dokcomo会","350ml &","1本無料引換えクーポン"),750,1334),null);
+  assert.equal(findProductNameRetryRect([],750,1334),null);
 });
 
 test("ローソン券の空白区切り17桁バーコードを検出する", () => {

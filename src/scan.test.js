@@ -132,6 +132,35 @@ test("翠ジンソーダの先頭が崩れても特徴的な後半表記から�
   assert.equal(extractProductNameGuess(lines("すいじんそーだ")), "翠ジンソーダ");
 });
 
+test("プレモルの実画像で、ロゴより商品名2行と容量の段落を優先する", () => {
+  const productLines = [
+    { text: "g ry =", y: 818, y1: 845 },
+    { text: "PREMIUM J F M |", y: 933, y1: 972 },
+    { text: "MALT'S i eg", y: 968, y1: 1029 },
+    { text: "Py ン", y: 1162, y1: 1182 },
+    { text: "ザ ・ プ レミ アム ・ モ ルツ /", y: 1202, y1: 1230 },
+    { text: "ザ ・ プ レミ アム ・ モ ルツ 夕映 舌 る エー ル", y: 1242, y1: 1271 },
+    { text: "350ml 缶", y: 1284, y1: 1312 },
+    { text: "いずれ か 1 本 無料 引換 え ク ー ポ ン", y: 1358, y1: 1387 },
+  ];
+  const expected = "ザ・プレミアム・モルツ／ザ・プレミアム・モルツ 夕映香るエール 350ml缶";
+  assert.equal(extractProductNameGuess(productLines), expected);
+  assert.equal(extractProductNameGuess(productLines.map(line => ({
+    ...line, text: line.text.replace("夕映 舌", "夕映 香"),
+  }))), expected);
+});
+
+test("容量が別行の商品段落を読むが、ロゴの断片だけでは商品名を作らない", () => {
+  assert.equal(
+    extractProductNameGuess(lines("g ry =", "レモンスカッシュ", "250ml 缶", "1本無料引換えクーポン")),
+    "レモンスカッシュ 250ml缶"
+  );
+  assert.equal(extractProductNameGuess(lines("g ry =")), "");
+  assert.equal(extractProductNameGuess(lines("g ry =", "350ml 缶", "いずれか1本無料引換えクーポン")), "");
+  assert.equal(extractProductNameGuess(lines("Red Bull")), "Red Bull");
+  assert.equal(extractProductNameGuess(lines("「Coca-Cola」無料引換券")), "Coca-Cola");
+});
+
 test("ローソン券の空白区切り17桁バーコードを検出する", () => {
   const printedNumbers = [
     "8222 0052 4251 5844 4",

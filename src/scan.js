@@ -990,8 +990,48 @@ function findLineBelowLargestGap(lines) {
 // 取りこぼす恐れがある。緩い判定を後段に残しておけば、従来読めていたものは
 // これまでどおり読めたうえで、缶のロゴ誤読などは前段で先に弾ける。
 export function extractProductNameGuess(lines) {
-  const guessed = guessProductName(lines, true) || guessProductName(lines, false);
+  const guessed =
+    extractMultilineExchangeProduct(lines) ||
+    guessProductName(lines, true) ||
+    guessProductName(lines, false);
+  // 英字を許す従来のフォールバックでも、等号・縦棒を含むロゴの断片は採用しない。
+  // 「g ry =」を特定商品へ置換せず、商品名の根拠がない場合は読み取り失敗にする。
+  if (/[=|｜]/.test(guessed) && !hasEnoughNameChars(guessed, true) &&
+      !PRODUCT_UNIT_PATTERN.test(guessed)) return "";
   return normalizeKnownProductName(guessed);
+}
+
+// セブン等の「商品名（複数行）→容量だけの行→いずれか1本無料引換えクーポン」。
+// 既存の抽出では容量行だけが単位語に一致し、商品名行は候補から落ちる。
+// 引換文にはノイズ語「クーポン」があるため、そのまま連結しても採用されない。
+// 独立したパターンで引換文をアンカーにし、直前の近接した商品名段落だけを読む。
+function extractMultilineExchangeProduct(lines) {
+  if (!lines?.length) return "";
+  const exchangePattern = /^(?:いずれか\s*)?\d+\s*(?:本|個|袋|缶)\s*無料\s*引き?換え?\s*クーポン[。.!！]?$/;
+  const volumePattern = /^\d+(?:\.\d+)?\s*(?:ml|ｍｌ|g)\s*(?:缶|ボトル|パック|袋)?$/i;
+  const adjacent = (above, below) => {
+    const height = Math.max(1, (above.y1 || above.y) - above.y);
+    const gap = below.y - (above.y1 || above.y);
+    return gap >= 0 && gap <= height * 2.2;
+  };
+
+  for (let i = 2; i < lines.length; i++) {
+    if (!exchangePattern.test(tidySpacing(lines[i].text || ""))) continue;
+    const volume = tidySpacing(lines[i - 1].text || "");
+    if (!volumePattern.test(volume) || !adjacent(lines[i - 1], lines[i])) continue;
+    const names = [];
+    for (let k = i - 2; k >= 0 && k >= i - 4; k--) {
+      if (!adjacent(lines[k], lines[k + 1])) break;
+      const name = cleanProductLine(lines[k].text || "", true);
+      if (!name || PRODUCT_UNIT_PATTERN.test(name)) break;
+      names.unshift(name);
+    }
+    if (names.length) {
+      const name = names.join("").replace(/\s*[/／]\s*/g, "／");
+      return `${name} ${volume.replace(/\s+/g, "")}`;
+    }
+  }
+  return "";
 }
 
 // 商品固有のデザイン文字は、同じ券面でも端末や圧縮状態によって大きく崩れる。
@@ -1005,6 +1045,12 @@ const KNOWN_PRODUCT_NAME_PATTERNS = [
 function normalizeKnownProductName(value) {
   if (!value) return "";
   const normalized = tidySpacing(value);
+  // 実画像で「夕映香る」が「夕映舌る」になった。プレモル2種の選択券の
+  // 商品名全体が一致した場合だけ補正し、他のエールや容量へ流用しない。
+  if (/^ザ・プレミアム・モルツ[/／]ザ・プレミアム・モルツ夕映[香舌]るエール350ml缶$/i
+    .test(normalized.replace(/\s+/g, ""))) {
+    return "ザ・プレミアム・モルツ／ザ・プレミアム・モルツ 夕映香るエール 350ml缶";
+  }
   const known = KNOWN_PRODUCT_NAME_PATTERNS.find(([pattern]) => pattern.test(normalized));
   return known ? known[1] : value;
 }

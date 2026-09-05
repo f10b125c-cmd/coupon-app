@@ -1,0 +1,13 @@
+.git
+.vercel
+node_modules
+dist
+.DS_Store
+*.local
+.env*
+serviceAccount*.json
+*-service-account*.json
+*-firebase-adminsdk-*.json
+test-results
+playwright-report
+e2e

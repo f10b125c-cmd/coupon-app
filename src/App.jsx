@@ -14,6 +14,7 @@ import {
   ChevronLeft,
   ChevronRight,
   RefreshCw,
+  Search,
 } from "lucide-react";
 import {
   scanBarcodeWithCrop,
@@ -31,6 +32,7 @@ import {
   deleteCouponFromCloud,
   compressImageForStorage,
 } from "./cloudStore.js";
+import { handoffImageToGoogleLens, selectLensImage } from "./lensSearch.js";
 
 /* ---------------------------------------------------------
    フォント読み込み（やわらかい丸ゴシックの世界観に寄せる）
@@ -768,6 +770,10 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
   const [barcode, setBarcode] = useState(coupon.barcode || "");
   const [scanning, setScanning] = useState(false);
   const [scanMessage, setScanMessage] = useState("");
+  const [lensBusy, setLensBusy] = useState(false);
+  const [lensMessage, setLensMessage] = useState("");
+  const [lensRegistrationOpen, setLensRegistrationOpen] = useState(false);
+  const [lensProductName, setLensProductName] = useState("");
   const touchStartRef = useRef({ x: 0, y: 0 });
 
   const status = computeStatus(coupon);
@@ -998,6 +1004,51 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
     } finally {
       setScanning(false);
     }
+  }
+
+  async function searchProductWithGoogleLens() {
+    const lensImage = selectLensImage(coupon);
+    if (!lensImage.dataUrl || lensBusy) return;
+    if (!lensImage.productOnly) {
+      const confirmed = window.confirm(
+        "このクーポンには分離した商品画像がないため、券面全体をGoogle Lensへ送ります。バーコードなどが含まれる場合があります。続けますか？"
+      );
+      if (!confirmed) return;
+    }
+
+    setLensBusy(true);
+    setLensMessage("");
+    try {
+      const result = await handoffImageToGoogleLens(lensImage.dataUrl);
+      setLensRegistrationOpen(true);
+      if (result.method === "share") {
+        setLensMessage("共有先でGoogleまたはGoogle Lensを選び、商品名を確認してください。戻ったら下へ入力できます。");
+      } else if (result.method === "clipboard") {
+        setLensMessage("商品画像をコピーしてGoogle画像検索を開きました。画像を貼り付けて検索し、戻ったら下へ商品名を入力してください。");
+      } else {
+        setLensMessage("Google画像検索を開きました。商品画像をアップロードし、戻ったら下へ商品名を入力してください。");
+      }
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        setLensMessage("Google Lensへの共有をキャンセルしました。");
+      } else {
+        console.error("[searchProductWithGoogleLens] 商品画像を渡せませんでした", error);
+        setLensMessage("商品画像をGoogle Lensへ渡せませんでした。もう一度お試しください。");
+      }
+    } finally {
+      setLensBusy(false);
+    }
+  }
+
+  function registerLensProductName() {
+    const nextName = lensProductName.trim();
+    if (!nextName) return;
+    const next = { ...coupon, productName: nextName, updatedAt: new Date().toISOString() };
+    onUpdate(next);
+    setProductName(nextName);
+    setLensProductName("");
+    setLensRegistrationOpen(false);
+    setLensMessage(`商品名を「${nextName}」に更新しました。`);
   }
 
   function markUnused() {
@@ -1498,6 +1549,84 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
               期限 {fmtDate(coupon.expiresAt)}
               <StoreBadge store={coupon.store} small />
             </div>
+
+            {(coupon.productImageDataUrl || coupon.imageDataUrl) && (
+              <div
+                style={{
+                  marginBottom: 16,
+                  padding: 12,
+                  borderRadius: 12,
+                  border: `1px solid ${COLORS.line}`,
+                  background: "#FFF9F6",
+                }}
+              >
+                <button
+                  onClick={searchProductWithGoogleLens}
+                  disabled={lensBusy}
+                  style={{
+                    ...primaryBtn(COLORS.ink),
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 7,
+                    opacity: lensBusy ? 0.6 : 1,
+                    cursor: lensBusy ? "not-allowed" : "pointer",
+                  }}
+                >
+                  <Search size={16} />
+                  {lensBusy ? "商品画像を準備中…" : "Google Lensで商品名を調べる"}
+                </button>
+                <div
+                  style={{
+                    marginTop: 7,
+                    fontFamily: "'M PLUS Rounded 1c', sans-serif",
+                    fontSize: 11,
+                    lineHeight: 1.55,
+                    color: COLORS.muted,
+                  }}
+                >
+                  {coupon.productImageDataUrl
+                    ? "商品画像がGoogleへ送信されます。結果を確認してから登録します。"
+                    : "分離画像がない券は、確認後に券面全体がGoogleへ送信されます。Lens上で商品部分を選んでください。"}
+                </div>
+                {lensMessage && (
+                  <div
+                    role="status"
+                    style={{
+                      marginTop: 8,
+                      fontFamily: "'M PLUS Rounded 1c', sans-serif",
+                      fontSize: 12,
+                      lineHeight: 1.55,
+                      color: COLORS.ink,
+                    }}
+                  >
+                    {lensMessage}
+                  </div>
+                )}
+                {lensRegistrationOpen && (
+                  <div style={{ marginTop: 10 }}>
+                    <input
+                      value={lensProductName}
+                      onChange={(event) => setLensProductName(event.target.value)}
+                      placeholder="Lensで確認した商品名を入力・貼り付け"
+                      aria-label="Lensで確認した商品名"
+                      style={{ ...inputStyle, marginTop: 0 }}
+                    />
+                    <button
+                      onClick={registerLensProductName}
+                      disabled={!lensProductName.trim()}
+                      style={{
+                        ...primaryBtn(lensProductName.trim() ? COLORS.forest : COLORS.line),
+                        marginTop: 8,
+                        cursor: lensProductName.trim() ? "pointer" : "not-allowed",
+                      }}
+                    >
+                      この商品名を登録
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
             {coupon.barcode && (
               <div
                 style={{

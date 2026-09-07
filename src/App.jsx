@@ -1340,13 +1340,13 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
           borderRadius: 20,
           // 高さ(max-height)と下の余白は .sheet 側で指定する。
           // ここで padding や maxHeight を書くとインラインが勝ってしまうため書かない。
-          paddingTop: 20,
+          paddingTop: 12,
           paddingLeft: 20,
           paddingRight: 20,
           overflowY: "auto",
         }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
           <StampBadge status={status} />
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <button onClick={() => setEditing((v) => !v)} style={{ ...iconBtnStyle, width: 44, height: 44 }}>
@@ -1557,14 +1557,14 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
         ) : (
           <>
             {displayedBarcodeImageDataUrl && (
-              <div style={{ marginBottom: 12 }}>
-                <div style={fieldLabel}>バーコード</div>
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ ...fieldLabel, marginBottom: 5 }}>バーコード</div>
                 <img
                   src={displayedBarcodeImageDataUrl}
                   alt="バーコード"
                   style={{
                     width: "100%",
-                    maxHeight: 170,
+                    maxHeight: "min(18dvh, 140px)",
                     objectFit: "contain",
                     borderRadius: 12,
                     border: `1px solid ${COLORS.line}`,
@@ -1575,14 +1575,14 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
               </div>
             )}
             {coupon.productImageDataUrl && (
-              <div style={{ marginBottom: 12 }}>
-                <div style={fieldLabel}>商品画像</div>
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ ...fieldLabel, marginBottom: 5 }}>商品画像</div>
                 <img
                   src={coupon.productImageDataUrl}
                   alt={coupon.productName || "商品画像"}
                   style={{
                     width: "100%",
-                    maxHeight: 220,
+                    maxHeight: "min(25dvh, 200px)",
                     objectFit: "contain",
                     borderRadius: 12,
                     border: `1px solid ${COLORS.line}`,
@@ -1593,11 +1593,33 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
               </div>
             )}
             {coupon.productImageDataUrl && pageNavigator}
+            {displayedCouponImageDataUrl && (
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ ...fieldLabel, marginBottom: 5 }}>クーポン画像</div>
+                <img
+                  src={displayedCouponImageDataUrl}
+                  alt={coupon.productName}
+                  style={{
+                    width: "100%",
+                    maxHeight: "min(25dvh, 200px)",
+                    objectFit: "contain",
+                    borderRadius: 12,
+                    border: `1px solid ${COLORS.line}`,
+                    display: "block",
+                    background: "#FFF9F6",
+                  }}
+                />
+              </div>
+            )}
+            {displayedCouponImageDataUrl && pageNavigator}
+            {!coupon.productImageDataUrl && !displayedCouponImageDataUrl && pageNavigator}
+
             {coupon.imageDataUrl && (
               <div style={{ marginBottom: 12 }}>
                 <button
                   onClick={rescanAndOverwrite}
                   disabled={scanning}
+                  aria-label="読み取り直す"
                   style={{
                     display: "flex",
                     alignItems: "center",
@@ -1632,18 +1654,6 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
                 )}
               </div>
             )}
-
-            {displayedCouponImageDataUrl && (
-              <div style={{ marginBottom: 12 }}>
-                <img
-                  src={displayedCouponImageDataUrl}
-                  alt={coupon.productName}
-                  style={{ width: "100%", borderRadius: 12, border: `1px solid ${COLORS.line}`, display: "block" }}
-                />
-              </div>
-            )}
-            {displayedCouponImageDataUrl && pageNavigator}
-            {!coupon.productImageDataUrl && !displayedCouponImageDataUrl && pageNavigator}
 
             <h2
               style={{

@@ -49,6 +49,7 @@ test("詳細画面で現在位置と前後移動を分かりやすく表示す�
 
   const navigation = page.getByRole("navigation", { name: "クーポンのページ移動" });
   const couponImage = page.getByRole("img", { name: "クーリッシュ バニラ", exact: true });
+  const barcodeImage = page.getByRole("img", { name: "バーコード", exact: true });
   await expect(navigation.getByLabel("全3件中 1件目")).toBeVisible();
   await expect(navigation.getByRole("button", { name: "前のクーポン" })).toBeDisabled();
   await expect(navigation.getByRole("button", { name: "次のクーポン" })).toBeEnabled();
@@ -57,6 +58,26 @@ test("詳細画面で現在位置と前後移動を分かりやすく表示す�
     await couponImage.evaluate((image) => {
       const nav = image.closest(".sheet")?.querySelector('[aria-label="クーポンのページ移動"]');
       return Boolean(nav && image.compareDocumentPosition(nav) & Node.DOCUMENT_POSITION_FOLLOWING);
+    })
+  ).toBe(true);
+  expect(
+    await page.evaluate(() => {
+      const elements = [
+        document.querySelector('img[alt="バーコード"]'),
+        document.querySelector('img[alt="クーリッシュ バニラ"]'),
+        document.querySelector('[aria-label="クーポンのページ移動"]'),
+      ];
+      return elements.every((element) => {
+        const rect = element?.getBoundingClientRect();
+        return rect && rect.top >= 0 && rect.bottom <= window.innerHeight;
+      });
+    })
+  ).toBe(true);
+  await expect(barcodeImage).toBeVisible();
+  expect(
+    await navigation.evaluate((nav) => {
+      const rescan = nav.closest(".sheet")?.querySelector('button[aria-label="読み取り直す"]');
+      return Boolean(rescan && nav.compareDocumentPosition(rescan) & Node.DOCUMENT_POSITION_FOLLOWING);
     })
   ).toBe(true);
   expect((await page.locator(".sheet").boundingBox()).y).toBeLessThan(24);

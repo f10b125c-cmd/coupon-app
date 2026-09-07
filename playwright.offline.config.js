@@ -3,7 +3,12 @@ import { defineConfig } from "@playwright/test";
 // 家族のFirestoreへ接続しない回帰テストだけを選択する。
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: ["offline-rescan.spec.js", "lens-manual.spec.js", "detail-navigation.spec.js"],
+  testMatch: [
+    "offline-rescan.spec.js",
+    "lens-manual.spec.js",
+    "detail-navigation.spec.js",
+    "barcode-auto-crop.spec.js",
+  ],
   timeout: 240_000,
   expect: { timeout: 15_000 },
   workers: 1,

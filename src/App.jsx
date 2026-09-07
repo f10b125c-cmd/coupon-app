@@ -930,12 +930,16 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
   const [memo, setMemo] = useState(coupon.memo || "");
   const [barcode, setBarcode] = useState(coupon.barcode || "");
   const [scanning, setScanning] = useState(false);
+  const [barcodeCropping, setBarcodeCropping] = useState(false);
   const [scanMessage, setScanMessage] = useState("");
   const [lensBusy, setLensBusy] = useState(false);
   const [lensMessage, setLensMessage] = useState("");
   const [lensRegistrationOpen, setLensRegistrationOpen] = useState(false);
   const [lensProductName, setLensProductName] = useState("");
   const touchStartRef = useRef({ x: 0, y: 0 });
+  const barcodeCropPromiseRef = useRef(null);
+  const latestCouponRef = useRef(coupon);
+  latestCouponRef.current = coupon;
 
   const status = computeStatus(coupon);
   const barcodeDetectedStore = detectStoreFromBarcode(barcode);
@@ -1049,6 +1053,56 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
     if (coupon.inbox && coupon.imageDataUrl && !coupon.autoScanned) {
       autoScan();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 通常の画像クーポンに切り出し済みバーコードがない場合は、詳細を開いた
+  // タイミングで軽量なバーコード検出だけを行う。URL取り込みはimageDataUrl自体が
+  // 公式バーコード画像なので、productImageDataUrlがある券では再切り出ししない。
+  useEffect(() => {
+    if (
+      !coupon.imageDataUrl ||
+      coupon.productImageDataUrl ||
+      coupon.barcodeImageDataUrl ||
+      (coupon.inbox && !coupon.autoScanned)
+    ) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    setBarcodeCropping(true);
+    // React StrictModeは開発時にEffectを再実行するため、同じ解析Promiseを共有して
+    // 1回の詳細表示で画像解析が二重に走らないようにする。
+    if (!barcodeCropPromiseRef.current) {
+      barcodeCropPromiseRef.current = scanBarcodeWithCrop(coupon.imageDataUrl);
+    }
+    barcodeCropPromiseRef.current
+      .then((result) => {
+        const cropped = result?.barcodeImageDataUrl;
+        if (cancelled || !cropped) return;
+        const latestCoupon = latestCouponRef.current;
+        if (latestCoupon.barcodeImageDataUrl) {
+          setBarcodeImageDataUrl(latestCoupon.barcodeImageDataUrl);
+          return;
+        }
+        setBarcodeImageDataUrl(cropped);
+        onUpdate({
+          ...latestCoupon,
+          barcodeImageDataUrl: cropped,
+          updatedAt: new Date().toISOString(),
+        });
+      })
+      .catch((error) => {
+        console.error("[autoCropBarcode] バーコード部分の切り出しに失敗しました", error);
+      })
+      .finally(() => {
+        if (!cancelled) setBarcodeCropping(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+    // クーポンを切り替えるとDetailModal自体がkeyで再生成されるため、初回だけ実行する。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1573,6 +1627,24 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
           </>
         ) : (
           <>
+            {barcodeCropping && !displayedBarcodeImageDataUrl && (
+              <div
+                role="status"
+                style={{
+                  marginBottom: 8,
+                  padding: "9px 10px",
+                  borderRadius: 10,
+                  background: COLORS.forestSoft,
+                  color: COLORS.forest,
+                  fontFamily: "'M PLUS Rounded 1c', sans-serif",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  textAlign: "center",
+                }}
+              >
+                バーコード部分を切り出しています…
+              </div>
+            )}
             {displayedBarcodeImageDataUrl && (
               <div style={{ marginBottom: 8 }}>
                 <div style={{ ...fieldLabel, marginBottom: 5 }}>バーコード</div>

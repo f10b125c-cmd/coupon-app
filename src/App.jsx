@@ -66,6 +66,30 @@ function useSheetStyles() {
       "  padding-bottom: 28px;",
       "  padding-bottom: calc(28px + env(safe-area-inset-bottom));",
       "}",
+      "@keyframes coupon-page-leave-next {",
+      "  from { transform: translate3d(0, 0, 0); opacity: 1; }",
+      "  to { transform: translate3d(-24%, 0, 0); opacity: 0.2; }",
+      "}",
+      "@keyframes coupon-page-leave-prev {",
+      "  from { transform: translate3d(0, 0, 0); opacity: 1; }",
+      "  to { transform: translate3d(24%, 0, 0); opacity: 0.2; }",
+      "}",
+      "@keyframes coupon-page-enter-next {",
+      "  from { transform: translate3d(58%, 0, 0); opacity: 0.25; }",
+      "  to { transform: translate3d(0, 0, 0); opacity: 1; }",
+      "}",
+      "@keyframes coupon-page-enter-prev {",
+      "  from { transform: translate3d(-58%, 0, 0); opacity: 0.25; }",
+      "  to { transform: translate3d(0, 0, 0); opacity: 1; }",
+      "}",
+      ".coupon-page-leave-next { animation: coupon-page-leave-next 130ms ease-in both; pointer-events: none; }",
+      ".coupon-page-leave-prev { animation: coupon-page-leave-prev 130ms ease-in both; pointer-events: none; }",
+      ".coupon-page-enter-next { animation: coupon-page-enter-next 240ms cubic-bezier(.2,.8,.2,1) both; }",
+      ".coupon-page-enter-prev { animation: coupon-page-enter-prev 240ms cubic-bezier(.2,.8,.2,1) both; }",
+      "@media (prefers-reduced-motion: reduce) {",
+      "  .coupon-page-leave-next, .coupon-page-leave-prev,",
+      "  .coupon-page-enter-next, .coupon-page-enter-prev { animation: none !important; }",
+      "}",
       "@media (max-width: 359px) {",
       "  .family-portal-link { width: 40px; padding: 0 !important; }",
       "  .family-portal-label { display: none; }",
@@ -755,7 +779,7 @@ function filesToDataUrls(fileList) {
 /* ---------------------------------------------------------
    詳細 / 編集モーダル
 --------------------------------------------------------- */
-function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onNext, position }) {
+function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onNext, position, pageTransition }) {
   const [editing, setEditing] = useState(!!coupon.inbox);
   const [productName, setProductName] = useState(coupon.productName);
   const [url, setUrl] = useState(coupon.url || "");
@@ -1175,7 +1199,8 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
       onClick={onClose}
     >
       <div
-        className="sheet"
+        className={`sheet${pageTransition ? ` coupon-page-${pageTransition}` : ""}`}
+        data-page-transition={pageTransition || "idle"}
         onClick={(e) => e.stopPropagation()}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
@@ -1962,11 +1987,63 @@ export default function CouponApp() {
   // 並び順は端末ごとの好みなのでlocalStorageに保持する
   const [sortKey, setSortKey] = useState(() => localStorage.getItem("coupons:sortKey") || "expiry");
   const [openCoupon, setOpenCoupon] = useState(null);
+  const [detailPageTransition, setDetailPageTransition] = useState("");
+  const detailPageTimersRef = useRef([]);
+  const detailPageMovingRef = useRef(false);
   const [selectedIds, setSelectedIds] = useState([]);
   const [expiryBannerDismissed, setExpiryBannerDismissed] = useState(false);
   const [bulkScanProgress, setBulkScanProgress] = useState(null);
   const [toasts, setToasts] = useState([]);
   const [syncError, setSyncError] = useState(false);
+
+  function clearDetailPageTransition() {
+    detailPageTimersRef.current.forEach((timer) => clearTimeout(timer));
+    detailPageTimersRef.current = [];
+    detailPageMovingRef.current = false;
+    setDetailPageTransition("");
+  }
+
+  function openCouponDetail(coupon) {
+    clearDetailPageTransition();
+    setOpenCoupon(coupon);
+  }
+
+  function closeCouponDetail() {
+    clearDetailPageTransition();
+    setOpenCoupon(null);
+  }
+
+  function moveCouponDetail(nextCoupon, direction) {
+    if (!nextCoupon || detailPageMovingRef.current) return;
+
+    const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+    if (reduceMotion) {
+      setOpenCoupon(nextCoupon);
+      setDetailPageTransition("");
+      return;
+    }
+
+    detailPageMovingRef.current = true;
+    setDetailPageTransition(`leave-${direction}`);
+    const leaveTimer = setTimeout(() => {
+      setOpenCoupon(nextCoupon);
+      setDetailPageTransition(`enter-${direction}`);
+      const enterTimer = setTimeout(() => {
+        detailPageMovingRef.current = false;
+        setDetailPageTransition("");
+        detailPageTimersRef.current = [];
+      }, 240);
+      detailPageTimersRef.current = [enterTimer];
+    }, 130);
+    detailPageTimersRef.current = [leaveTimer];
+  }
+
+  useEffect(
+    () => () => {
+      detailPageTimersRef.current.forEach((timer) => clearTimeout(timer));
+    },
+    []
+  );
 
   // 保存・削除の失敗を画面上部に数秒だけ表示する（alertの代わり）
   function notify(message) {
@@ -2138,7 +2215,7 @@ export default function CouponApp() {
 
   function deleteCoupon(id) {
     setCoupons((prev) => prev.filter((c) => c.id !== id));
-    setOpenCoupon(null);
+    closeCouponDetail();
     deleteCouponFromCloud(id).catch((e) => {
       console.error("[deleteCoupon] 削除に失敗しました", e);
       notify("クラウドでの削除に失敗しました。通信環境を確認してもう一度お試しください。");
@@ -2844,7 +2921,7 @@ export default function CouponApp() {
             <TicketCard
               key={c.id}
               coupon={c}
-              onOpen={setOpenCoupon}
+              onOpen={openCouponDetail}
               selected={selectedIds.includes(c.id)}
               onToggleSelect={toggleSelected}
             />
@@ -2948,16 +3025,21 @@ export default function CouponApp() {
           key={openCoupon.id}
           coupon={coupons.find((c) => c.id === openCoupon.id) || openCoupon}
           coupons={coupons}
-          onClose={() => setOpenCoupon(null)}
+          onClose={closeCouponDetail}
           onUpdate={updateCoupon}
           onDelete={deleteCoupon}
-          onPrev={openIndex > 0 ? () => setOpenCoupon(filtered[openIndex - 1]) : null}
+          onPrev={
+            openIndex > 0
+              ? () => moveCouponDetail(filtered[openIndex - 1], "prev")
+              : null
+          }
           onNext={
             openIndex >= 0 && openIndex < filtered.length - 1
-              ? () => setOpenCoupon(filtered[openIndex + 1])
+              ? () => moveCouponDetail(filtered[openIndex + 1], "next")
               : null
           }
           position={openIndex >= 0 ? { index: openIndex, total: filtered.length } : null}
+          pageTransition={detailPageTransition}
         />
       )}
 

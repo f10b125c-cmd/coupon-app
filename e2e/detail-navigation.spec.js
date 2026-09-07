@@ -51,7 +51,27 @@ test("詳細画面で現在位置と前後移動を分かりやすく表示す�
   await expect(navigation.getByRole("button", { name: "次のクーポン" })).toBeEnabled();
   await expect(navigation).toContainText("左右にスワイプしても移動できます");
 
+  await page.evaluate(() => {
+    window.__detailPageTransitions = [];
+    const record = () => {
+      const value = document.querySelector(".sheet")?.dataset.pageTransition;
+      if (value && window.__detailPageTransitions.at(-1) !== value) {
+        window.__detailPageTransitions.push(value);
+      }
+    };
+    record();
+    new MutationObserver(record).observe(document.body, {
+      attributes: true,
+      attributeFilter: ["data-page-transition"],
+      childList: true,
+      subtree: true,
+    });
+  });
+
   await navigation.getByRole("button", { name: "次のクーポン" }).click();
   await expect(page.getByRole("heading", { name: "アイスの実 ぶどうマスカット" })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "クーポンのページ移動" }).getByLabel("全3件中 2件目")).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => window.__detailPageTransitions.slice(0, 3)))
+    .toEqual(["idle", "leave-next", "enter-next"]);
 });

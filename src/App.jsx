@@ -48,11 +48,11 @@ function useFonts() {
   }, []);
 }
 
-// 画面下から出るシート（クーポンの詳細画面）の高さ。
+// クーポン詳細シートの高さと画面上端の位置。
 // スマホの vh はURLバーが引っ込んだ状態の高さを指すため、90vh だと
 // 実際に見えている範囲をはみ出し、シートの上端がURLバーの裏に隠れてしまう。
 // いま見えている高さを表す dvh を使い、未対応の端末には vh を残す。
-// 下端も、iPhoneのホームバーやブラウザの下部ツールバーに重ならないよう余白を足す。
+// 上端へ寄せつつ、iPhoneのノッチとホームバーを避けるぶんだけ高さを引く。
 function useSheetStyles() {
   useEffect(() => {
     const style = document.createElement("style");
@@ -61,8 +61,8 @@ function useSheetStyles() {
       // 余白込みで高さを制限する。既定(content-box)だと上下パディングのぶん
       // 指定より背が高くなり、画面上端との余裕がほとんど残らない。
       "  box-sizing: border-box;",
-      "  max-height: 88vh;",
-      "  max-height: 88dvh;",
+      "  max-height: calc(100vh - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom));",
+      "  max-height: calc(100dvh - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom));",
       "  padding-bottom: 28px;",
       "  padding-bottom: calc(28px + env(safe-area-inset-bottom));",
       "}",
@@ -779,6 +779,129 @@ function filesToDataUrls(fileList) {
 /* ---------------------------------------------------------
    詳細 / 編集モーダル
 --------------------------------------------------------- */
+function CouponPageNavigator({ position, onPrev, onNext }) {
+  if (!position || position.total <= 1) return null;
+
+  return (
+    <div
+      role="navigation"
+      aria-label="クーポンのページ移動"
+      style={{
+        marginBottom: 14,
+        padding: "9px 10px 8px",
+        borderRadius: 14,
+        border: `1.5px solid ${COLORS.line}`,
+        background: "#FFF9F6",
+      }}
+    >
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "82px minmax(0, 1fr) 82px",
+          alignItems: "center",
+          gap: 6,
+        }}
+      >
+        <button
+          type="button"
+          onClick={onPrev}
+          disabled={!onPrev}
+          aria-label="前のクーポン"
+          style={{
+            minHeight: 42,
+            borderRadius: 10,
+            border: `1.5px solid ${onPrev ? COLORS.line : "transparent"}`,
+            background: onPrev ? COLORS.paper : "transparent",
+            color: onPrev ? COLORS.ink : COLORS.line,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 2,
+            fontFamily: "'M PLUS Rounded 1c', sans-serif",
+            fontWeight: 700,
+            fontSize: 12,
+            cursor: onPrev ? "pointer" : "default",
+          }}
+        >
+          <ChevronLeft size={18} />
+          前へ
+        </button>
+        <div
+          aria-live="polite"
+          aria-atomic="true"
+          aria-label={`全${position.total}件中 ${position.index + 1}件目`}
+          style={{
+            minWidth: 0,
+            textAlign: "center",
+            fontFamily: "'M PLUS Rounded 1c', sans-serif",
+            color: COLORS.ink,
+            lineHeight: 1.15,
+          }}
+        >
+          <div style={{ fontSize: 10, color: COLORS.muted, marginBottom: 2 }}>表示中のクーポン</div>
+          <span style={{ fontSize: 21, fontWeight: 800 }}>{position.index + 1}</span>
+          <span style={{ fontSize: 12, fontWeight: 700 }}>件目 / 全{position.total}件</span>
+        </div>
+        <button
+          type="button"
+          onClick={onNext}
+          disabled={!onNext}
+          aria-label="次のクーポン"
+          style={{
+            minHeight: 42,
+            borderRadius: 10,
+            border: `1.5px solid ${onNext ? COLORS.line : "transparent"}`,
+            background: onNext ? COLORS.paper : "transparent",
+            color: onNext ? COLORS.ink : COLORS.line,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 2,
+            fontFamily: "'M PLUS Rounded 1c', sans-serif",
+            fontWeight: 700,
+            fontSize: 12,
+            cursor: onNext ? "pointer" : "default",
+          }}
+        >
+          次へ
+          <ChevronRight size={18} />
+        </button>
+      </div>
+      <div
+        aria-hidden="true"
+        style={{
+          height: 4,
+          margin: "7px 4px 0",
+          overflow: "hidden",
+          borderRadius: 999,
+          background: COLORS.line,
+        }}
+      >
+        <div
+          style={{
+            width: `${((position.index + 1) / position.total) * 100}%`,
+            height: "100%",
+            borderRadius: 999,
+            background: COLORS.forest,
+            transition: "width 180ms ease",
+          }}
+        />
+      </div>
+      <div
+        style={{
+          marginTop: 5,
+          textAlign: "center",
+          fontFamily: "'M PLUS Rounded 1c', sans-serif",
+          fontSize: 10,
+          color: COLORS.muted,
+        }}
+      >
+        左右にスワイプしても移動できます
+      </div>
+    </div>
+  );
+}
+
 function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onNext, position, pageTransition }) {
   const [editing, setEditing] = useState(!!coupon.inbox);
   const [productName, setProductName] = useState(coupon.productName);
@@ -1184,6 +1307,9 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
       )}
     </>
   );
+  const pageNavigator = (
+    <CouponPageNavigator position={position} onPrev={onPrev} onNext={onNext} />
+  );
 
   return (
     <div
@@ -1192,8 +1318,11 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
         inset: 0,
         background: "rgba(91,74,72,0.45)",
         display: "flex",
-        alignItems: "flex-end",
+        alignItems: "flex-start",
         justifyContent: "center",
+        boxSizing: "border-box",
+        paddingTop: "calc(8px + env(safe-area-inset-top))",
+        paddingBottom: "calc(8px + env(safe-area-inset-bottom))",
         zIndex: 50,
       }}
       onClick={onClose}
@@ -1208,7 +1337,7 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
           background: COLORS.paper,
           width: "100%",
           maxWidth: 480,
-          borderRadius: "20px 20px 0 0",
+          borderRadius: 20,
           // 高さ(max-height)と下の余白は .sheet 側で指定する。
           // ここで padding や maxHeight を書くとインラインが勝ってしまうため書かない。
           paddingTop: 20,
@@ -1228,125 +1357,6 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
             </button>
           </div>
         </div>
-
-        {position?.total > 1 && (
-          <div
-            role="navigation"
-            aria-label="クーポンのページ移動"
-            style={{
-              marginBottom: 14,
-              padding: "9px 10px 8px",
-              borderRadius: 14,
-              border: `1.5px solid ${COLORS.line}`,
-              background: "#FFF9F6",
-            }}
-          >
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "82px minmax(0, 1fr) 82px",
-                alignItems: "center",
-                gap: 6,
-              }}
-            >
-              <button
-                type="button"
-                onClick={onPrev}
-                disabled={!onPrev}
-                aria-label="前のクーポン"
-                style={{
-                  minHeight: 42,
-                  borderRadius: 10,
-                  border: `1.5px solid ${onPrev ? COLORS.line : "transparent"}`,
-                  background: onPrev ? COLORS.paper : "transparent",
-                  color: onPrev ? COLORS.ink : COLORS.line,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 2,
-                  fontFamily: "'M PLUS Rounded 1c', sans-serif",
-                  fontWeight: 700,
-                  fontSize: 12,
-                  cursor: onPrev ? "pointer" : "default",
-                }}
-              >
-                <ChevronLeft size={18} />
-                前へ
-              </button>
-              <div
-                aria-live="polite"
-                aria-atomic="true"
-                aria-label={`全${position.total}件中 ${position.index + 1}件目`}
-                style={{
-                  minWidth: 0,
-                  textAlign: "center",
-                  fontFamily: "'M PLUS Rounded 1c', sans-serif",
-                  color: COLORS.ink,
-                  lineHeight: 1.15,
-                }}
-              >
-                <div style={{ fontSize: 10, color: COLORS.muted, marginBottom: 2 }}>表示中のクーポン</div>
-                <span style={{ fontSize: 21, fontWeight: 800 }}>{position.index + 1}</span>
-                <span style={{ fontSize: 12, fontWeight: 700 }}>件目 / 全{position.total}件</span>
-              </div>
-              <button
-                type="button"
-                onClick={onNext}
-                disabled={!onNext}
-                aria-label="次のクーポン"
-                style={{
-                  minHeight: 42,
-                  borderRadius: 10,
-                  border: `1.5px solid ${onNext ? COLORS.line : "transparent"}`,
-                  background: onNext ? COLORS.paper : "transparent",
-                  color: onNext ? COLORS.ink : COLORS.line,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 2,
-                  fontFamily: "'M PLUS Rounded 1c', sans-serif",
-                  fontWeight: 700,
-                  fontSize: 12,
-                  cursor: onNext ? "pointer" : "default",
-                }}
-              >
-                次へ
-                <ChevronRight size={18} />
-              </button>
-            </div>
-            <div
-              aria-hidden="true"
-              style={{
-                height: 4,
-                margin: "7px 4px 0",
-                overflow: "hidden",
-                borderRadius: 999,
-                background: COLORS.line,
-              }}
-            >
-              <div
-                style={{
-                  width: `${((position.index + 1) / position.total) * 100}%`,
-                  height: "100%",
-                  borderRadius: 999,
-                  background: COLORS.forest,
-                  transition: "width 180ms ease",
-                }}
-              />
-            </div>
-            <div
-              style={{
-                marginTop: 5,
-                textAlign: "center",
-                fontFamily: "'M PLUS Rounded 1c', sans-serif",
-                fontSize: 10,
-                color: COLORS.muted,
-              }}
-            >
-              左右にスワイプしても移動できます
-            </div>
-          </div>
-        )}
 
         {editing ? (
           <>
@@ -1388,6 +1398,7 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
               </div>
             )}
             {!productImageDataUrl && editableCouponImageSection}
+            {pageNavigator}
             {imageDataUrl && (
               <div style={{ marginBottom: 14 }}>
                 <button
@@ -1581,6 +1592,7 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
                 />
               </div>
             )}
+            {coupon.productImageDataUrl && pageNavigator}
             {coupon.imageDataUrl && (
               <div style={{ marginBottom: 12 }}>
                 <button
@@ -1630,6 +1642,8 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
                 />
               </div>
             )}
+            {displayedCouponImageDataUrl && pageNavigator}
+            {!coupon.productImageDataUrl && !displayedCouponImageDataUrl && pageNavigator}
 
             <h2
               style={{

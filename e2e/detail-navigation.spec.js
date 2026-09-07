@@ -1,13 +1,15 @@
 import { test, expect } from "@playwright/test";
 
+const COUPON_IMAGE = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aU1sAAAAASUVORK5CYII=";
+
 const coupons = [
   { id: "nav-1", productName: "クーリッシュ バニラ", expiresAt: "2026-09-22" },
   { id: "nav-2", productName: "アイスの実 ぶどうマスカット", expiresAt: "2026-09-23" },
   { id: "nav-3", productName: "チョコモナカジャンボ", expiresAt: "2026-09-24" },
 ].map((coupon) => ({
   ...coupon,
-  imageDataUrl: null,
-  productImageDataUrl: null,
+  imageDataUrl: COUPON_IMAGE,
+  productImageDataUrl: COUPON_IMAGE,
   barcodeImageDataUrl: null,
   store: "lawson",
   barcode: "",
@@ -46,10 +48,18 @@ test("詳細画面で現在位置と前後移動を分かりやすく表示す�
   await page.getByText("クーリッシュ バニラ", { exact: true }).click();
 
   const navigation = page.getByRole("navigation", { name: "クーポンのページ移動" });
+  const couponImage = page.getByRole("img", { name: "クーリッシュ バニラ", exact: true });
   await expect(navigation.getByLabel("全3件中 1件目")).toBeVisible();
   await expect(navigation.getByRole("button", { name: "前のクーポン" })).toBeDisabled();
   await expect(navigation.getByRole("button", { name: "次のクーポン" })).toBeEnabled();
   await expect(navigation).toContainText("左右にスワイプしても移動できます");
+  expect(
+    await couponImage.evaluate((image) => {
+      const nav = image.closest(".sheet")?.querySelector('[aria-label="クーポンのページ移動"]');
+      return Boolean(nav && image.compareDocumentPosition(nav) & Node.DOCUMENT_POSITION_FOLLOWING);
+    })
+  ).toBe(true);
+  expect((await page.locator(".sheet").boundingBox()).y).toBeLessThan(24);
 
   await page.evaluate(() => {
     window.__detailPageTransitions = [];

@@ -788,7 +788,7 @@ function CouponPageNavigator({ position, onPrev, onNext }) {
       aria-label="クーポンのページ移動"
       style={{
         marginBottom: 14,
-        padding: "9px 10px 8px",
+        padding: "8px 10px",
         borderRadius: 14,
         border: `1.5px solid ${COLORS.line}`,
         background: "#FFF9F6",
@@ -797,9 +797,9 @@ function CouponPageNavigator({ position, onPrev, onNext }) {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "82px minmax(0, 1fr) 82px",
+          gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
           alignItems: "center",
-          gap: 6,
+          gap: 8,
         }}
       >
         <button
@@ -826,22 +826,6 @@ function CouponPageNavigator({ position, onPrev, onNext }) {
           <ChevronLeft size={18} />
           前へ
         </button>
-        <div
-          aria-live="polite"
-          aria-atomic="true"
-          aria-label={`全${position.total}件中 ${position.index + 1}件目`}
-          style={{
-            minWidth: 0,
-            textAlign: "center",
-            fontFamily: "'M PLUS Rounded 1c', sans-serif",
-            color: COLORS.ink,
-            lineHeight: 1.15,
-          }}
-        >
-          <div style={{ fontSize: 10, color: COLORS.muted, marginBottom: 2 }}>表示中のクーポン</div>
-          <span style={{ fontSize: 21, fontWeight: 800 }}>{position.index + 1}</span>
-          <span style={{ fontSize: 12, fontWeight: 700 }}>件目 / 全{position.total}件</span>
-        </div>
         <button
           type="button"
           onClick={onNext}
@@ -899,6 +883,36 @@ function CouponPageNavigator({ position, onPrev, onNext }) {
         左右にスワイプしても移動できます
       </div>
     </div>
+  );
+}
+
+function CouponPositionBadge({ position }) {
+  if (!position || position.total <= 1) return null;
+
+  return (
+    <span
+      aria-live="polite"
+      aria-atomic="true"
+      aria-label={`全${position.total}件中 ${position.index + 1}件目`}
+      style={{
+        display: "inline-flex",
+        alignItems: "baseline",
+        gap: 4,
+        minHeight: 28,
+        boxSizing: "border-box",
+        padding: "4px 9px",
+        borderRadius: 999,
+        border: `1.5px solid ${COLORS.line}`,
+        background: "#FFF9F6",
+        color: COLORS.ink,
+        fontFamily: "'M PLUS Rounded 1c', sans-serif",
+        whiteSpace: "nowrap",
+      }}
+    >
+      <span style={{ fontSize: 10, color: COLORS.muted }}>ページ</span>
+      <span style={{ fontSize: 15, fontWeight: 800 }}>{position.index + 1}</span>
+      <span style={{ fontSize: 11, fontWeight: 700 }}>/ {position.total}</span>
+    </span>
   );
 }
 
@@ -1347,7 +1361,10 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
-          <StampBadge status={status} />
+          <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+            <StampBadge status={status} />
+            <CouponPositionBadge position={position} />
+          </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <button onClick={() => setEditing((v) => !v)} style={{ ...iconBtnStyle, width: 44, height: 44 }}>
               {editing ? <Check size={20} color={COLORS.forest} /> : <Pencil size={19} color={COLORS.ink} />}

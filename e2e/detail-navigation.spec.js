@@ -50,7 +50,8 @@ test("詳細画面で現在位置と前後移動を分かりやすく表示す�
   const navigation = page.getByRole("navigation", { name: "クーポンのページ移動" });
   const couponImage = page.getByRole("img", { name: "クーリッシュ バニラ", exact: true });
   const barcodeImage = page.getByRole("img", { name: "バーコード", exact: true });
-  await expect(navigation.getByLabel("全3件中 1件目")).toBeVisible();
+  const positionBadge = page.getByLabel("全3件中 1件目");
+  await expect(positionBadge).toBeVisible();
   await expect(navigation.getByRole("button", { name: "前のクーポン" })).toBeDisabled();
   await expect(navigation.getByRole("button", { name: "次のクーポン" })).toBeEnabled();
   await expect(navigation).toContainText("左右にスワイプしても移動できます");
@@ -65,7 +66,7 @@ test("詳細画面で現在位置と前後移動を分かりやすく表示す�
       const elements = [
         document.querySelector('img[alt="バーコード"]'),
         document.querySelector('img[alt="クーリッシュ バニラ"]'),
-        document.querySelector('[aria-label="クーポンのページ移動"]'),
+        document.querySelector('[aria-label="全3件中 1件目"]'),
       ];
       return elements.every((element) => {
         const rect = element?.getBoundingClientRect();
@@ -74,6 +75,10 @@ test("詳細画面で現在位置と前後移動を分かりやすく表示す�
     })
   ).toBe(true);
   await expect(barcodeImage).toBeVisible();
+  const statusBox = await page.locator(".sheet").getByText("未使用", { exact: true }).boundingBox();
+  const positionBox = await positionBadge.boundingBox();
+  expect(Math.abs(statusBox.y - positionBox.y)).toBeLessThan(8);
+  expect(positionBox.x).toBeGreaterThan(statusBox.x + statusBox.width);
   expect(
     await navigation.evaluate((nav) => {
       const rescan = nav.closest(".sheet")?.querySelector('button[aria-label="読み取り直す"]');
@@ -101,7 +106,7 @@ test("詳細画面で現在位置と前後移動を分かりやすく表示す�
 
   await navigation.getByRole("button", { name: "次のクーポン" }).click();
   await expect(page.getByRole("heading", { name: "アイスの実 ぶどうマスカット" })).toBeVisible();
-  await expect(page.getByRole("navigation", { name: "クーポンのページ移動" }).getByLabel("全3件中 2件目")).toBeVisible();
+  await expect(page.getByLabel("全3件中 2件目")).toBeVisible();
   await expect
     .poll(() => page.evaluate(() => window.__detailPageTransitions.slice(0, 3)))
     .toEqual(["idle", "leave-next", "enter-next"]);

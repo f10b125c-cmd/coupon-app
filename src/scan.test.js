@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   calculateBarcodeCropRect,
+  calculateCouponPreviewCropRect,
   detectLinearBarcodeCropRect,
   detectStoreFromBarcode,
   extractBarcodeNumberGuess,
@@ -60,6 +61,38 @@ test("番号を復号できなくても縦線群からバーコード領域を�
   assert.ok(crop.sourceY < 90);
   assert.ok(crop.sourceX + crop.sourceWidth > 305);
   assert.ok(crop.sourceY + crop.sourceHeight > 145);
+});
+
+test("バーコードの反対側にある広い領域を商品プレビューとして切り出す", () => {
+  assert.deepEqual(
+    calculateCouponPreviewCropRect(750, 1334, {
+      sourceX: 120,
+      sourceY: 210,
+      sourceWidth: 510,
+      sourceHeight: 180,
+    }),
+    { sourceX: 0, sourceY: 401, sourceWidth: 750, sourceHeight: 933 }
+  );
+
+  assert.deepEqual(
+    calculateCouponPreviewCropRect(600, 1000, {
+      sourceX: 80,
+      sourceY: 760,
+      sourceWidth: 440,
+      sourceHeight: 140,
+    }),
+    { sourceX: 0, sourceY: 0, sourceWidth: 600, sourceHeight: 752 }
+  );
+
+  assert.equal(
+    calculateCouponPreviewCropRect(600, 500, {
+      sourceX: 100,
+      sourceY: 190,
+      sourceWidth: 400,
+      sourceHeight: 120,
+    }),
+    null
+  );
 });
 
 test("横長でも黒白の反復がない文字帯はバーコードにしない", () => {

@@ -245,36 +245,77 @@ export function detectLinearBarcodeCropRect(imageData) {
   return { sourceX, sourceY, sourceWidth, sourceHeight };
 }
 
-function canvasCropDataUrl(img, crop) {
-  if (!crop) return null;
-  const { sourceX, sourceY, sourceWidth, sourceHeight } = crop;
-  const scale = Math.min(1, 1200 / sourceWidth);
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(sourceWidth * scale));
-  canvas.height = Math.max(1, Math.round(sourceHeight * scale));
-  const ctx = canvas.getContext("2d");
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(
-    img,
-    sourceX,
-    sourceY,
-    sourceWidth,
-    sourceHeight,
-    0,
-    0,
-    canvas.width,
-    canvas.height
+// バーコードの上下で広い側を商品確認用のプレビューにする。
+// セブン系はバーコードの下、ローソン系は上に商品があるため、店舗名や
+// 固定座標ではなく余白の広さで向きを決める。元画像は別に保持する。
+export function calculateCouponPreviewCropRect(imageWidth, imageHeight, barcodeCrop) {
+  if (!barcodeCrop || imageWidth < 80 || imageHeight < 80) return null;
+  const barcodeTop = Math.max(0, barcodeCrop.sourceY);
+  const barcodeBottom = Math.min(
+    imageHeight,
+    barcodeCrop.sourceY + barcodeCrop.sourceHeight
   );
-  const png = canvas.toDataURL("image/png");
-  if (png.length <= 180 * 1024) return png;
-  for (const quality of [0.9, 0.8, 0.7, 0.6]) {
-    const jpeg = canvas.toDataURL("image/jpeg", quality);
-    if (jpeg.length <= 180 * 1024) return jpeg;
-  }
-  return canvas.toDataURL("image/jpeg", 0.5);
+  const gap = Math.max(4, Math.min(20, Math.round(imageHeight * 0.008)));
+  const topAvailable = Math.max(0, barcodeTop - gap);
+  const bottomStart = Math.min(imageHeight, barcodeBottom + gap);
+  const bottomAvailable = Math.max(0, imageHeight - bottomStart);
+  const useBottom = bottomAvailable >= topAvailable;
+  const available = useBottom ? bottomAvailable : topAvailable;
+
+  // 商品写真と直下の商品名が一緒に収まる縦長寄りの範囲にする。
+  // 十分な領域がない場合は誤った小片を保存せず、元画像表示へ戻す。
+  if (available < imageWidth * 0.55) return null;
+  const sourceHeight = Math.max(
+    1,
+    Math.round(Math.min(available, imageWidth * 1.35))
+  );
+  const sourceY = useBottom ? bottomStart : Math.max(0, topAvailable - sourceHeight);
+
+  return {
+    sourceX: 0,
+    sourceY,
+    sourceWidth: imageWidth,
+    sourceHeight,
+  };
 }
 
-async function cropBarcodeByVisualDetection(sourceDataUrl) {
+function canvasCropDataUrl(img, crop, maxBytes = 180 * 1024) {
+  if (!crop) return null;
+  const { sourceX, sourceY, sourceWidth, sourceHeight } = crop;
+  let lastResult = null;
+
+  // 商品プレビューを追加してもFirestoreの1MiB上限へ収まるよう、必要なら
+  // 段階的に縮小する。バーコードは通常、最初の高解像度の試行で収まる。
+  for (const maxDimension of [1200, 1000, 800, 640, 520, 420, 340]) {
+    const scale = Math.min(1, maxDimension / Math.max(sourceWidth, sourceHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+    canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+    const ctx = canvas.getContext("2d");
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(
+      img,
+      sourceX,
+      sourceY,
+      sourceWidth,
+      sourceHeight,
+      0,
+      0,
+      canvas.width,
+      canvas.height
+    );
+    const png = canvas.toDataURL("image/png");
+    if (png.length <= maxBytes) return png;
+    for (const quality of [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.35]) {
+      const jpeg = canvas.toDataURL("image/jpeg", quality);
+      lastResult = jpeg;
+      if (jpeg.length <= maxBytes) return jpeg;
+    }
+  }
+  return lastResult;
+}
+
+async function cropCouponRegionsByVisualDetection(sourceDataUrl) {
   const img = await loadImage(sourceDataUrl);
   const canvas = document.createElement("canvas");
   canvas.width = img.width;
@@ -282,7 +323,15 @@ async function cropBarcodeByVisualDetection(sourceDataUrl) {
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   ctx.drawImage(img, 0, 0);
   const crop = detectLinearBarcodeCropRect(ctx.getImageData(0, 0, canvas.width, canvas.height));
-  return canvasCropDataUrl(img, crop);
+  return {
+    barcodeImageDataUrl: canvasCropDataUrl(img, crop),
+    // 元画像700KB＋バーコード180KBと共存できるよう、商品側は90KB以内に抑える。
+    couponPreviewImageDataUrl: canvasCropDataUrl(
+      img,
+      calculateCouponPreviewCropRect(img.width, img.height, crop),
+      90 * 1024
+    ),
+  };
 }
 
 export async function scanBarcodeWithCrop(imageDataUrl) {
@@ -311,32 +360,39 @@ export async function scanBarcodeWithCrop(imageDataUrl) {
     }
   }
 
+  // ZXingの復号と並行して元画像上の線群を調べる。ここで得た位置は、
+  // バーコードだけでなく店舗ごとに上下が異なる商品領域の切り出しにも使う。
+  const visualCropsPromise = cropCouponRegionsByVisualDetection(baseDataUrl).catch(() => ({
+    barcodeImageDataUrl: null,
+    couponPreviewImageDataUrl: null,
+  }));
+
   for (const src of candidates) {
     try {
       const result = await withTimeout(reader.decodeFromImageUrl(src), 15000, "バーコード解析");
       if (result) {
         let barcodeImageDataUrl = null;
+        const visualCrops = await visualCropsPromise;
         try {
           barcodeImageDataUrl = await cropBarcodeFromResult(src, result);
-          if (!barcodeImageDataUrl) {
-            barcodeImageDataUrl = await cropBarcodeByVisualDetection(src);
-          }
         } catch (e) {
           // 切り出しだけ失敗しても、バーコード番号の読み取り結果は返す。
         }
-        return { text: result.getText(), barcodeImageDataUrl };
+        if (!barcodeImageDataUrl) {
+          barcodeImageDataUrl = visualCrops.barcodeImageDataUrl;
+        }
+        return {
+          text: result.getText(),
+          barcodeImageDataUrl,
+          couponPreviewImageDataUrl: visualCrops.couponPreviewImageDataUrl,
+        };
       }
     } catch (e) {
       // この候補では見つからなかった。次の候補へ。
     }
   }
-  let barcodeImageDataUrl = null;
-  try {
-    barcodeImageDataUrl = await cropBarcodeByVisualDetection(baseDataUrl);
-  } catch (e) {
-    // 予備検出に失敗してもOCRによる番号抽出へ進めるよう空で返す。
-  }
-  return { text: null, barcodeImageDataUrl };
+  const visualCrops = await visualCropsPromise;
+  return { text: null, ...visualCrops };
 }
 
 export async function scanBarcode(imageDataUrl) {

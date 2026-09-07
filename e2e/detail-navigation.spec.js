@@ -1,6 +1,11 @@
 import { test, expect } from "@playwright/test";
 
-const COUPON_IMAGE = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aU1sAAAAASUVORK5CYII=";
+const imageDataUrl = (width, height, fill) =>
+  `data:image/svg+xml,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="100%" height="100%" fill="${fill}"/></svg>`
+  )}`;
+const BARCODE_IMAGE = imageDataUrl(900, 240, "white");
+const COUPON_IMAGE = imageDataUrl(650, 820, "lightblue");
 
 const coupons = [
   { id: "nav-1", productName: "クーリッシュ バニラ", expiresAt: "2026-09-22" },
@@ -8,7 +13,7 @@ const coupons = [
   { id: "nav-3", productName: "チョコモナカジャンボ", expiresAt: "2026-09-24" },
 ].map((coupon) => ({
   ...coupon,
-  imageDataUrl: COUPON_IMAGE,
+  imageDataUrl: BARCODE_IMAGE,
   productImageDataUrl: COUPON_IMAGE,
   barcodeImageDataUrl: null,
   store: "lawson",
@@ -44,23 +49,16 @@ test.beforeEach(async ({ page }) => {
   await page.goto("/");
 });
 
-test("詳細画面で現在位置と前後移動を分かりやすく表示する", async ({ page }) => {
+test("詳細画面は件数だけを表示し、スワイプで前後移動する", async ({ page }) => {
   await page.getByText("クーリッシュ バニラ", { exact: true }).click();
 
-  const navigation = page.getByRole("navigation", { name: "クーポンのページ移動" });
   const couponImage = page.getByRole("img", { name: "クーリッシュ バニラ", exact: true });
   const barcodeImage = page.getByRole("img", { name: "バーコード", exact: true });
   const positionBadge = page.getByLabel("全3件中 1件目");
   await expect(positionBadge).toBeVisible();
-  await expect(navigation.getByRole("button", { name: "前のクーポン" })).toBeDisabled();
-  await expect(navigation.getByRole("button", { name: "次のクーポン" })).toBeEnabled();
-  await expect(navigation).toContainText("左右にスワイプしても移動できます");
-  expect(
-    await couponImage.evaluate((image) => {
-      const nav = image.closest(".sheet")?.querySelector('[aria-label="クーポンのページ移動"]');
-      return Boolean(nav && image.compareDocumentPosition(nav) & Node.DOCUMENT_POSITION_FOLLOWING);
-    })
-  ).toBe(true);
+  await expect(page.getByRole("button", { name: "前のクーポン" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "次のクーポン" })).toHaveCount(0);
+  await expect(page.getByText("左右にスワイプしても移動できます")).toHaveCount(0);
   expect(
     await page.evaluate(() => {
       const elements = [
@@ -80,9 +78,9 @@ test("詳細画面で現在位置と前後移動を分かりやすく表示す�
   expect(Math.abs(statusBox.y - positionBox.y)).toBeLessThan(8);
   expect(positionBox.x).toBeGreaterThan(statusBox.x + statusBox.width);
   expect(
-    await navigation.evaluate((nav) => {
-      const rescan = nav.closest(".sheet")?.querySelector('button[aria-label="読み取り直す"]');
-      return Boolean(rescan && nav.compareDocumentPosition(rescan) & Node.DOCUMENT_POSITION_FOLLOWING);
+    await couponImage.evaluate((image) => {
+      const rescan = image.closest(".sheet")?.querySelector('button[aria-label="読み取り直す"]');
+      return Boolean(rescan && image.compareDocumentPosition(rescan) & Node.DOCUMENT_POSITION_FOLLOWING);
     })
   ).toBe(true);
   expect((await page.locator(".sheet").boundingBox()).y).toBeLessThan(24);
@@ -104,7 +102,18 @@ test("詳細画面で現在位置と前後移動を分かりやすく表示す�
     });
   });
 
-  await navigation.getByRole("button", { name: "次のクーポン" }).click();
+  await page.locator(".sheet").evaluate((sheet) => {
+    const dispatchTouch = (type, clientX) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      const touches = [{ clientX, clientY: 320 }];
+      Object.defineProperty(event, type === "touchstart" ? "touches" : "changedTouches", {
+        value: touches,
+      });
+      sheet.dispatchEvent(event);
+    };
+    dispatchTouch("touchstart", 330);
+    dispatchTouch("touchend", 80);
+  });
   await expect(page.getByRole("heading", { name: "アイスの実 ぶどうマスカット" })).toBeVisible();
   await expect(page.getByLabel("全3件中 2件目")).toBeVisible();
   await expect

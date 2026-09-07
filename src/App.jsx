@@ -11,8 +11,6 @@ import {
   ArrowUpDown,
   ScanLine,
   Send,
-  ChevronLeft,
-  ChevronRight,
   RefreshCw,
   Search,
 } from "lucide-react";
@@ -779,113 +777,6 @@ function filesToDataUrls(fileList) {
 /* ---------------------------------------------------------
    詳細 / 編集モーダル
 --------------------------------------------------------- */
-function CouponPageNavigator({ position, onPrev, onNext }) {
-  if (!position || position.total <= 1) return null;
-
-  return (
-    <div
-      role="navigation"
-      aria-label="クーポンのページ移動"
-      style={{
-        marginBottom: 14,
-        padding: "8px 10px",
-        borderRadius: 14,
-        border: `1.5px solid ${COLORS.line}`,
-        background: "#FFF9F6",
-      }}
-    >
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-          alignItems: "center",
-          gap: 8,
-        }}
-      >
-        <button
-          type="button"
-          onClick={onPrev}
-          disabled={!onPrev}
-          aria-label="前のクーポン"
-          style={{
-            minHeight: 42,
-            borderRadius: 10,
-            border: `1.5px solid ${onPrev ? COLORS.line : "transparent"}`,
-            background: onPrev ? COLORS.paper : "transparent",
-            color: onPrev ? COLORS.ink : COLORS.line,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 2,
-            fontFamily: "'M PLUS Rounded 1c', sans-serif",
-            fontWeight: 700,
-            fontSize: 12,
-            cursor: onPrev ? "pointer" : "default",
-          }}
-        >
-          <ChevronLeft size={18} />
-          前へ
-        </button>
-        <button
-          type="button"
-          onClick={onNext}
-          disabled={!onNext}
-          aria-label="次のクーポン"
-          style={{
-            minHeight: 42,
-            borderRadius: 10,
-            border: `1.5px solid ${onNext ? COLORS.line : "transparent"}`,
-            background: onNext ? COLORS.paper : "transparent",
-            color: onNext ? COLORS.ink : COLORS.line,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 2,
-            fontFamily: "'M PLUS Rounded 1c', sans-serif",
-            fontWeight: 700,
-            fontSize: 12,
-            cursor: onNext ? "pointer" : "default",
-          }}
-        >
-          次へ
-          <ChevronRight size={18} />
-        </button>
-      </div>
-      <div
-        aria-hidden="true"
-        style={{
-          height: 4,
-          margin: "7px 4px 0",
-          overflow: "hidden",
-          borderRadius: 999,
-          background: COLORS.line,
-        }}
-      >
-        <div
-          style={{
-            width: `${((position.index + 1) / position.total) * 100}%`,
-            height: "100%",
-            borderRadius: 999,
-            background: COLORS.forest,
-            transition: "width 180ms ease",
-          }}
-        />
-      </div>
-      <div
-        style={{
-          marginTop: 5,
-          textAlign: "center",
-          fontFamily: "'M PLUS Rounded 1c', sans-serif",
-          fontSize: 10,
-          color: COLORS.muted,
-        }}
-      >
-        左右にスワイプしても移動できます
-      </div>
-    </div>
-  );
-}
-
 function CouponPositionBadge({ position }) {
   if (!position || position.total <= 1) return null;
 
@@ -925,6 +816,9 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
   const [barcodeImageDataUrl, setBarcodeImageDataUrl] = useState(
     coupon.barcodeImageDataUrl || null
   );
+  const [couponPreviewImageDataUrl, setCouponPreviewImageDataUrl] = useState(
+    coupon.couponPreviewImageDataUrl || null
+  );
   const [expiresAt, setExpiresAt] = useState(coupon.expiresAt);
   const [store, setStore] = useState(normalizeStoreKey(coupon.store));
   const [memo, setMemo] = useState(coupon.memo || "");
@@ -953,6 +847,7 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
       const dataUrl = reader.result;
       setImageDataUrl(dataUrl);
       setBarcodeImageDataUrl(null);
+      setCouponPreviewImageDataUrl(null);
       // 画像を選んだ時点で読み取りを始め、手動でボタンを押す手間をなくす。
       // state の反映を待たず、選択した元画像をそのまま解析に渡す。
       autoScan(dataUrl);
@@ -988,6 +883,9 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
       let barcodeText = barcodeResult.text;
       if (!productImageDataUrl && barcodeResult.barcodeImageDataUrl) {
         setBarcodeImageDataUrl(barcodeResult.barcodeImageDataUrl);
+      }
+      if (!productImageDataUrl && barcodeResult.couponPreviewImageDataUrl) {
+        setCouponPreviewImageDataUrl(barcodeResult.couponPreviewImageDataUrl);
       }
 
       setScanMessage("文字を認識中…（初回は時間がかかります）");
@@ -1056,14 +954,14 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 通常の画像クーポンに切り出し済みバーコードがない場合は、詳細を開いた
-  // タイミングで軽量なバーコード検出だけを行う。URL取り込みはimageDataUrl自体が
+  // 通常の画像クーポンに切り出し済みバーコードまたは商品プレビューがない場合は、
+  // 詳細を開いたタイミングで軽量な画像検出だけを行う。URL取り込みはimageDataUrl自体が
   // 公式バーコード画像なので、productImageDataUrlがある券では再切り出ししない。
   useEffect(() => {
     if (
       !coupon.imageDataUrl ||
       coupon.productImageDataUrl ||
-      coupon.barcodeImageDataUrl ||
+      (coupon.barcodeImageDataUrl && coupon.couponPreviewImageDataUrl) ||
       (coupon.inbox && !coupon.autoScanned)
     ) {
       return undefined;
@@ -1078,17 +976,29 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
     }
     barcodeCropPromiseRef.current
       .then((result) => {
-        const cropped = result?.barcodeImageDataUrl;
-        if (cancelled || !cropped) return;
+        const croppedBarcode = result?.barcodeImageDataUrl;
+        const croppedPreview = result?.couponPreviewImageDataUrl;
+        if (cancelled || (!croppedBarcode && !croppedPreview)) return;
         const latestCoupon = latestCouponRef.current;
+        const updates = {};
         if (latestCoupon.barcodeImageDataUrl) {
           setBarcodeImageDataUrl(latestCoupon.barcodeImageDataUrl);
+        } else if (croppedBarcode) {
+          setBarcodeImageDataUrl(croppedBarcode);
+          updates.barcodeImageDataUrl = croppedBarcode;
+        }
+        if (latestCoupon.couponPreviewImageDataUrl) {
+          setCouponPreviewImageDataUrl(latestCoupon.couponPreviewImageDataUrl);
+        } else if (croppedPreview) {
+          setCouponPreviewImageDataUrl(croppedPreview);
+          updates.couponPreviewImageDataUrl = croppedPreview;
+        }
+        if (!Object.keys(updates).length) {
           return;
         }
-        setBarcodeImageDataUrl(cropped);
         onUpdate({
           ...latestCoupon,
-          barcodeImageDataUrl: cropped,
+          ...updates,
           updatedAt: new Date().toISOString(),
         });
       })
@@ -1130,6 +1040,7 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
       imageDataUrl: finalImage,
       productImageDataUrl,
       barcodeImageDataUrl,
+      couponPreviewImageDataUrl,
       sourceType: finalImage ? "screenshot" : url ? "url" : coupon.sourceType,
       expiresAt,
       store,
@@ -1166,13 +1077,24 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
         !coupon.productImageDataUrl && barcodeResult.barcodeImageDataUrl
           ? barcodeResult.barcodeImageDataUrl
           : null;
+      const detectedCouponPreviewImage =
+        !coupon.productImageDataUrl && barcodeResult.couponPreviewImageDataUrl
+          ? barcodeResult.couponPreviewImageDataUrl
+          : null;
       if (detectedBarcodeImage) {
         setBarcodeImageDataUrl(detectedBarcodeImage);
+      }
+      if (detectedCouponPreviewImage) {
+        setCouponPreviewImageDataUrl(detectedCouponPreviewImage);
+      }
+      if (detectedBarcodeImage || detectedCouponPreviewImage) {
         // OCRは端末によって1分以上かかるため、切り出せたバーコード画像だけは
         // 待たずに先に保存して、途中で画面を閉じても結果が残るようにする。
         onUpdate({
           ...coupon,
-          barcodeImageDataUrl: detectedBarcodeImage,
+          barcodeImageDataUrl: detectedBarcodeImage || coupon.barcodeImageDataUrl || null,
+          couponPreviewImageDataUrl:
+            detectedCouponPreviewImage || coupon.couponPreviewImageDataUrl || null,
           updatedAt: new Date().toISOString(),
         });
       }
@@ -1196,6 +1118,10 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
           detectedBarcodeImage ||
           coupon.barcodeImageDataUrl ||
           null,
+        couponPreviewImageDataUrl:
+          detectedCouponPreviewImage ||
+          coupon.couponPreviewImageDataUrl ||
+          null,
         updatedAt: new Date().toISOString(),
       };
       onUpdate(next);
@@ -1205,6 +1131,7 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
       setExpiresAt(next.expiresAt);
       setBarcode(next.barcode);
       setBarcodeImageDataUrl(next.barcodeImageDataUrl);
+      setCouponPreviewImageDataUrl(next.couponPreviewImageDataUrl);
       const updatedFields = [
         detectedName && `商品名を「${detectedName}」`,
         detectedDate && `期限を「${detectedDate}」`,
@@ -1275,7 +1202,12 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
   // 必ず商品画像・元の券面より先に置く。
   const displayedBarcodeImageDataUrl =
     barcodeImageDataUrl || (productImageDataUrl ? imageDataUrl : null);
-  const displayedCouponImageDataUrl = productImageDataUrl ? null : imageDataUrl;
+  const displayedCouponImageDataUrl = productImageDataUrl
+    ? null
+    : couponPreviewImageDataUrl || imageDataUrl;
+  const showingCroppedCouponPreview = Boolean(
+    !productImageDataUrl && couponPreviewImageDataUrl
+  );
 
   const editableCouponImageSection = (
     <>
@@ -1327,6 +1259,7 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
               onClick={() => {
                 setImageDataUrl(null);
                 setBarcodeImageDataUrl(null);
+                setCouponPreviewImageDataUrl(null);
               }}
               style={{
                 ...imageActionBtnStyle,
@@ -1375,10 +1308,6 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
       )}
     </>
   );
-  const pageNavigator = (
-    <CouponPageNavigator position={position} onPrev={onPrev} onNext={onNext} />
-  );
-
   return (
     <div
       style={{
@@ -1469,7 +1398,6 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
               </div>
             )}
             {!productImageDataUrl && editableCouponImageSection}
-            {pageNavigator}
             {imageDataUrl && (
               <div style={{ marginBottom: 14 }}>
                 <button
@@ -1627,7 +1555,7 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
           </>
         ) : (
           <>
-            {barcodeCropping && !displayedBarcodeImageDataUrl && (
+            {barcodeCropping && (!displayedBarcodeImageDataUrl || !couponPreviewImageDataUrl) && (
               <div
                 role="status"
                 style={{
@@ -1642,7 +1570,7 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
                   textAlign: "center",
                 }}
               >
-                バーコード部分を切り出しています…
+                画像を見やすく整えています…
               </div>
             )}
             {displayedBarcodeImageDataUrl && (
@@ -1671,7 +1599,7 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
                   alt={coupon.productName || "商品画像"}
                   style={{
                     width: "100%",
-                    maxHeight: "min(25dvh, 200px)",
+                    maxHeight: "min(38dvh, 310px)",
                     objectFit: "contain",
                     borderRadius: 12,
                     border: `1px solid ${COLORS.line}`,
@@ -1681,16 +1609,17 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
                 />
               </div>
             )}
-            {coupon.productImageDataUrl && pageNavigator}
             {displayedCouponImageDataUrl && (
               <div style={{ marginBottom: 10 }}>
-                <div style={{ ...fieldLabel, marginBottom: 5 }}>クーポン画像</div>
+                <div style={{ ...fieldLabel, marginBottom: 5 }}>
+                  {showingCroppedCouponPreview ? "商品部分（自動切り出し）" : "クーポン画像"}
+                </div>
                 <img
                   src={displayedCouponImageDataUrl}
                   alt={coupon.productName}
                   style={{
                     width: "100%",
-                    maxHeight: "min(25dvh, 200px)",
+                    maxHeight: "min(38dvh, 310px)",
                     objectFit: "contain",
                     borderRadius: 12,
                     border: `1px solid ${COLORS.line}`,
@@ -1700,8 +1629,6 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
                 />
               </div>
             )}
-            {displayedCouponImageDataUrl && pageNavigator}
-            {!coupon.productImageDataUrl && !displayedCouponImageDataUrl && pageNavigator}
 
             {coupon.imageDataUrl && (
               <div style={{ marginBottom: 12 }}>
@@ -2246,6 +2173,7 @@ export default function CouponApp() {
       url,
       imageDataUrl,
       barcodeImageDataUrl: null,
+      couponPreviewImageDataUrl: null,
       expiresAt: "",
       store: "",
       barcode: "",
@@ -2287,6 +2215,8 @@ export default function CouponApp() {
             ...toSave,
             barcode: normalizeBarcode(barcodeText) || barcodeText || "",
             barcodeImageDataUrl: barcodeResult.barcodeImageDataUrl || null,
+            couponPreviewImageDataUrl:
+              barcodeResult.couponPreviewImageDataUrl || null,
             store: detectedStore || "",
             expiresAt: detectedDate || "",
             productName: detectedName || "",
@@ -2348,7 +2278,8 @@ export default function CouponApp() {
           !c.store ||
           !c.expiresAt ||
           !c.barcode ||
-          (!c.productImageDataUrl && !c.barcodeImageDataUrl))
+          (!c.productImageDataUrl &&
+            (!c.barcodeImageDataUrl || !c.couponPreviewImageDataUrl)))
     );
     if (!targets.length) {
       notify("再読み取りが必要な未整理クーポンはありません。");
@@ -2393,6 +2324,10 @@ export default function CouponApp() {
           barcodeImageDataUrl:
             (!c.productImageDataUrl && barcodeResult.barcodeImageDataUrl) ||
             c.barcodeImageDataUrl ||
+            null,
+          couponPreviewImageDataUrl:
+            (!c.productImageDataUrl && barcodeResult.couponPreviewImageDataUrl) ||
+            c.couponPreviewImageDataUrl ||
             null,
           autoScanned: true,
           inbox: canAutoRegister ? false : c.inbox,
@@ -2454,6 +2389,10 @@ export default function CouponApp() {
           barcodeImageDataUrl:
             (!c.productImageDataUrl && barcodeResult.barcodeImageDataUrl) ||
             c.barcodeImageDataUrl ||
+            null,
+          couponPreviewImageDataUrl:
+            (!c.productImageDataUrl && barcodeResult.couponPreviewImageDataUrl) ||
+            c.couponPreviewImageDataUrl ||
             null,
           updatedAt: new Date().toISOString(),
         });

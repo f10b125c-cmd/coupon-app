@@ -3,8 +3,11 @@ import { test, expect } from "@playwright/test";
 const PRODUCT_IMAGE = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aU1sAAAAASUVORK5CYII=";
 const FULL_IMAGE = "data:image/jpeg;base64,AA==";
 
-async function prepare(page, { productImageDataUrl = PRODUCT_IMAGE } = {}) {
-  await page.addInitScript(({ productImageDataUrl, fullImage }) => {
+async function prepare(
+  page,
+  { productImageDataUrl = PRODUCT_IMAGE, couponPreviewImageDataUrl = null } = {}
+) {
+  await page.addInitScript(({ productImageDataUrl, couponPreviewImageDataUrl, fullImage }) => {
     window.__lensShares = [];
     window.__lensWrites = [];
     Object.defineProperty(navigator, "canShare", { configurable: true, value: () => true });
@@ -17,12 +20,12 @@ async function prepare(page, { productImageDataUrl = PRODUCT_IMAGE } = {}) {
     }});
     window.__lensCoupon = {
       id: "lens-manual", productName: "ul dokcomo会", imageDataUrl: fullImage,
-      productImageDataUrl, expiresAt: "2026-09-22", store: "seven",
+      productImageDataUrl, couponPreviewImageDataUrl, expiresAt: "2026-09-22", store: "seven",
       barcode: "2393997412078", memo: "変更しないメモ", status: "unused",
       inbox: false, autoScanned: true, createdAt: "2026-09-05T00:00:00Z",
       updatedAt: "2026-09-05T00:00:00Z",
     };
-  }, { productImageDataUrl, fullImage: FULL_IMAGE });
+  }, { productImageDataUrl, couponPreviewImageDataUrl, fullImage: FULL_IMAGE });
 
   await page.route(/https:\/\/[^/]*(?:googleapis\.com|firebaseio\.com)\//, route => {
     if (route.request().url().startsWith("https://fonts.googleapis.com/")) return route.continue();
@@ -75,4 +78,21 @@ test("商品画像が未分離なら券面全体を送る前に確認する", as
   await page.getByRole("button", { name: "Google Lensで商品名を調べる", exact: true }).click();
   expect(warning).toContain("バーコードなどが含まれる場合があります");
   expect(await page.evaluate(() => window.__lensShares[0].files[0].type)).toBe("image/jpeg");
+});
+
+test("自動切り出し済みなら商品部分だけを確認なしで共有する", async ({ page }) => {
+  await prepare(page, {
+    productImageDataUrl: null,
+    couponPreviewImageDataUrl: PRODUCT_IMAGE,
+  });
+  let dialogOpened = false;
+  page.on("dialog", async (dialog) => {
+    dialogOpened = true;
+    await dialog.dismiss();
+  });
+
+  await page.getByRole("button", { name: "Google Lensで商品名を調べる", exact: true }).click();
+  await expect(page.getByText(/共有先でGoogleまたはGoogle Lens/)).toBeVisible();
+  expect(dialogOpened).toBe(false);
+  expect(await page.evaluate(() => window.__lensShares[0].files[0].type)).toBe("image/png");
 });

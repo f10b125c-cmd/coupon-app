@@ -4,6 +4,9 @@ export function selectLensImage(coupon) {
   if (coupon?.productImageDataUrl) {
     return { dataUrl: coupon.productImageDataUrl, productOnly: true };
   }
+  if (coupon?.couponPreviewImageDataUrl) {
+    return { dataUrl: coupon.couponPreviewImageDataUrl, productOnly: true };
+  }
   return { dataUrl: coupon?.imageDataUrl || "", productOnly: false };
 }
 

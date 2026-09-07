@@ -1193,43 +1193,8 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <StampBadge status={status} />
-            {position && (
-              <span
-                style={{
-                  fontFamily: "'M PLUS Rounded 1c', sans-serif",
-                  fontSize: 12,
-                  color: COLORS.muted,
-                }}
-              >
-                {position.index + 1} / {position.total}
-              </span>
-            )}
-          </div>
+          <StampBadge status={status} />
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            {(onPrev || onNext) && (
-              <div
-                style={{
-                  display: "flex",
-                  gap: 6,
-                  paddingRight: 8,
-                  marginRight: 2,
-                  borderRight: `1px solid ${COLORS.line}`,
-                }}
-              >
-                {onPrev && (
-                  <button onClick={onPrev} aria-label="前のクーポン" style={{ ...iconBtnStyle, width: 36, height: 36 }}>
-                    <ChevronLeft size={18} color={COLORS.ink} />
-                  </button>
-                )}
-                {onNext && (
-                  <button onClick={onNext} aria-label="次のクーポン" style={{ ...iconBtnStyle, width: 36, height: 36 }}>
-                    <ChevronRight size={18} color={COLORS.ink} />
-                  </button>
-                )}
-              </div>
-            )}
             <button onClick={() => setEditing((v) => !v)} style={{ ...iconBtnStyle, width: 44, height: 44 }}>
               {editing ? <Check size={20} color={COLORS.forest} /> : <Pencil size={19} color={COLORS.ink} />}
             </button>
@@ -1238,6 +1203,125 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
             </button>
           </div>
         </div>
+
+        {position?.total > 1 && (
+          <div
+            role="navigation"
+            aria-label="クーポンのページ移動"
+            style={{
+              marginBottom: 14,
+              padding: "9px 10px 8px",
+              borderRadius: 14,
+              border: `1.5px solid ${COLORS.line}`,
+              background: "#FFF9F6",
+            }}
+          >
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "82px minmax(0, 1fr) 82px",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <button
+                type="button"
+                onClick={onPrev}
+                disabled={!onPrev}
+                aria-label="前のクーポン"
+                style={{
+                  minHeight: 42,
+                  borderRadius: 10,
+                  border: `1.5px solid ${onPrev ? COLORS.line : "transparent"}`,
+                  background: onPrev ? COLORS.paper : "transparent",
+                  color: onPrev ? COLORS.ink : COLORS.line,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 2,
+                  fontFamily: "'M PLUS Rounded 1c', sans-serif",
+                  fontWeight: 700,
+                  fontSize: 12,
+                  cursor: onPrev ? "pointer" : "default",
+                }}
+              >
+                <ChevronLeft size={18} />
+                前へ
+              </button>
+              <div
+                aria-live="polite"
+                aria-atomic="true"
+                aria-label={`全${position.total}件中 ${position.index + 1}件目`}
+                style={{
+                  minWidth: 0,
+                  textAlign: "center",
+                  fontFamily: "'M PLUS Rounded 1c', sans-serif",
+                  color: COLORS.ink,
+                  lineHeight: 1.15,
+                }}
+              >
+                <div style={{ fontSize: 10, color: COLORS.muted, marginBottom: 2 }}>表示中のクーポン</div>
+                <span style={{ fontSize: 21, fontWeight: 800 }}>{position.index + 1}</span>
+                <span style={{ fontSize: 12, fontWeight: 700 }}>件目 / 全{position.total}件</span>
+              </div>
+              <button
+                type="button"
+                onClick={onNext}
+                disabled={!onNext}
+                aria-label="次のクーポン"
+                style={{
+                  minHeight: 42,
+                  borderRadius: 10,
+                  border: `1.5px solid ${onNext ? COLORS.line : "transparent"}`,
+                  background: onNext ? COLORS.paper : "transparent",
+                  color: onNext ? COLORS.ink : COLORS.line,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 2,
+                  fontFamily: "'M PLUS Rounded 1c', sans-serif",
+                  fontWeight: 700,
+                  fontSize: 12,
+                  cursor: onNext ? "pointer" : "default",
+                }}
+              >
+                次へ
+                <ChevronRight size={18} />
+              </button>
+            </div>
+            <div
+              aria-hidden="true"
+              style={{
+                height: 4,
+                margin: "7px 4px 0",
+                overflow: "hidden",
+                borderRadius: 999,
+                background: COLORS.line,
+              }}
+            >
+              <div
+                style={{
+                  width: `${((position.index + 1) / position.total) * 100}%`,
+                  height: "100%",
+                  borderRadius: 999,
+                  background: COLORS.forest,
+                  transition: "width 180ms ease",
+                }}
+              />
+            </div>
+            <div
+              style={{
+                marginTop: 5,
+                textAlign: "center",
+                fontFamily: "'M PLUS Rounded 1c', sans-serif",
+                fontSize: 10,
+                color: COLORS.muted,
+              }}
+            >
+              左右にスワイプしても移動できます
+            </div>
+          </div>
+        )}
 
         {editing ? (
           <>

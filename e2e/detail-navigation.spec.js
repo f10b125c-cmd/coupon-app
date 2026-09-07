@@ -1,0 +1,57 @@
+import { test, expect } from "@playwright/test";
+
+const coupons = [
+  { id: "nav-1", productName: "クーリッシュ バニラ", expiresAt: "2026-09-22" },
+  { id: "nav-2", productName: "アイスの実 ぶどうマスカット", expiresAt: "2026-09-23" },
+  { id: "nav-3", productName: "チョコモナカジャンボ", expiresAt: "2026-09-24" },
+].map((coupon) => ({
+  ...coupon,
+  imageDataUrl: null,
+  productImageDataUrl: null,
+  barcodeImageDataUrl: null,
+  store: "lawson",
+  barcode: "",
+  memo: "",
+  status: "unused",
+  inbox: false,
+  autoScanned: true,
+  createdAt: "2026-09-07T00:00:00Z",
+  updatedAt: "2026-09-07T00:00:00Z",
+}));
+
+test.beforeEach(async ({ page }) => {
+  await page.clock.setFixedTime(new Date("2026-09-07T00:00:00Z"));
+  await page.addInitScript((initialCoupons) => {
+    window.__navigationCoupons = initialCoupons;
+  }, coupons);
+  await page.route(/https:\/\/[^/]*(?:googleapis\.com|firebaseio\.com)\//, (route) => {
+    if (route.request().url().startsWith("https://fonts.googleapis.com/")) return route.continue();
+    return route.abort();
+  });
+  await page.route("**/src/cloudStore.js", (route) =>
+    route.fulfill({
+      contentType: "application/javascript",
+      body: `
+        export async function subscribeCoupons(fn) { fn(window.__navigationCoupons); return () => {}; }
+        export async function saveCouponToCloud() { throw new Error("Writes forbidden"); }
+        export async function deleteCouponFromCloud() { throw new Error("Deletion forbidden"); }
+        export async function compressImageForStorage(data) { return data; }
+      `,
+    })
+  );
+  await page.goto("/");
+});
+
+test("詳細画面で現在位置と前後移動を分かりやすく表示する", async ({ page }) => {
+  await page.getByText("クーリッシュ バニラ", { exact: true }).click();
+
+  const navigation = page.getByRole("navigation", { name: "クーポンのページ移動" });
+  await expect(navigation.getByLabel("全3件中 1件目")).toBeVisible();
+  await expect(navigation.getByRole("button", { name: "前のクーポン" })).toBeDisabled();
+  await expect(navigation.getByRole("button", { name: "次のクーポン" })).toBeEnabled();
+  await expect(navigation).toContainText("左右にスワイプしても移動できます");
+
+  await navigation.getByRole("button", { name: "次のクーポン" }).click();
+  await expect(page.getByRole("heading", { name: "アイスの実 ぶどうマスカット" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "クーポンのページ移動" }).getByLabel("全3件中 2件目")).toBeVisible();
+});

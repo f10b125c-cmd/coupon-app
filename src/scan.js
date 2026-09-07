@@ -381,6 +381,15 @@ export async function scanBarcodeWithCrop(imageDataUrl) {
         if (!barcodeImageDataUrl) {
           barcodeImageDataUrl = visualCrops.barcodeImageDataUrl;
         }
+        if (!barcodeImageDataUrl && src !== baseDataUrl) {
+          try {
+            barcodeImageDataUrl = (
+              await cropCouponRegionsByVisualDetection(src)
+            ).barcodeImageDataUrl;
+          } catch (e) {
+            // 横帯候補でも切り出せなければ番号だけを返す。
+          }
+        }
         return {
           text: result.getText(),
           barcodeImageDataUrl,

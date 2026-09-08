@@ -5,6 +5,8 @@ const coupons = [
   { id: "choco", productName: "チョコモナカジャンボ", expiresAt: "2026-09-13" },
   { id: "ice", productName: "アイスの実 ぶどうマスカット", expiresAt: "2026-09-11" },
   { id: "cool-soon", productName: "【お持ち帰り限定】クーリッシュ バニラ（税込194円）", expiresAt: "2026-09-12" },
+  { id: "tako-one", productName: "サントリー こだわり酒場のタコハイ 1本", expiresAt: "2026-09-14" },
+  { id: "tako-plain", productName: "こだわり酒場のタコハイ", expiresAt: "2026-09-15" },
 ].map((coupon, index) => ({
   ...coupon,
   imageDataUrl: null,
@@ -56,10 +58,10 @@ test("同じ商品を一覧とスワイプ順で隣り合わせにする", async
     await page.locator("button[data-coupon-id]").evaluateAll((cards) =>
       cards.map((card) => card.dataset.couponId)
     )
-  ).toEqual(["ice", "cool-soon", "cool-late", "choco"]);
+  ).toEqual(["ice", "cool-soon", "cool-late", "choco", "tako-one", "tako-plain"]);
 
   await page.locator('button[data-coupon-id="cool-soon"]').click();
-  await expect(page.getByLabel("全4件中 2件目")).toBeVisible();
+  await expect(page.getByLabel("全6件中 2件目")).toBeVisible();
   await page.locator(".sheet").evaluate((sheet) => {
     const dispatchTouch = (type, clientX) => {
       const event = new Event(type, { bubbles: true, cancelable: true });
@@ -73,5 +75,5 @@ test("同じ商品を一覧とスワイプ順で隣り合わせにする", async
   });
 
   await expect(page.getByRole("heading", { name: "ロッテ クーリッシュ バニラ" })).toBeVisible();
-  await expect(page.getByLabel("全4件中 3件目")).toBeVisible();
+  await expect(page.getByLabel("全6件中 3件目")).toBeVisible();
 });

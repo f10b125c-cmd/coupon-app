@@ -17,6 +17,21 @@ test("券種・メーカー・価格・空白が違っても同じ商品キー�
   );
 });
 
+test("末尾に券の数量1本が残っても同じ商品キーに揃える", () => {
+  assert.equal(
+    normalizeProductGroupKey("サントリー こだわり酒場のタコハイ 1本"),
+    normalizeProductGroupKey("こだわり酒場のタコハイ")
+  );
+  assert.equal(
+    normalizeProductGroupKey("こだわり酒場のタコハイ（一本）"),
+    normalizeProductGroupKey("こだわり酒場のタコハイ")
+  );
+  assert.notEqual(
+    normalizeProductGroupKey("1本満足バー"),
+    normalizeProductGroupKey("満足バー")
+  );
+});
+
 test("同じ商品を連続させ、商品グループ内は期限が近い順にする", () => {
   const coupons = [
     { id: "cool-late", productName: "ロッテ クーリッシュ バニラ", expiresAt: "2026-09-20" },

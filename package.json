@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test": "node --test src/scan.test.js api/_lib/lineUrl.test.js",
+    "test": "node --test src/scan.test.js src/couponSort.test.js api/_lib/lineUrl.test.js",
     "preview": "vite preview",
     "e2e": "playwright test",
     "e2e:offline": "playwright test --config playwright.offline.config.js",

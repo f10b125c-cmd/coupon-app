@@ -8,6 +8,7 @@ export default defineConfig({
     "lens-manual.spec.js",
     "detail-navigation.spec.js",
     "barcode-auto-crop.spec.js",
+    "product-grouping.spec.js",
   ],
   timeout: 240_000,
   expect: { timeout: 15_000 },

@@ -31,6 +31,7 @@ import {
   compressImageForStorage,
 } from "./cloudStore.js";
 import { handoffImageToGoogleLens, selectLensImage } from "./lensSearch.js";
+import { sortCouponsByProduct } from "./couponSort.js";
 
 /* ---------------------------------------------------------
    フォント読み込み（やわらかい丸ゴシックの世界観に寄せる）
@@ -469,6 +470,7 @@ function TicketCard({ coupon, onOpen, selected, onToggleSelect }) {
 
   return (
     <button
+      data-coupon-id={coupon.id}
       onClick={() => onOpen(coupon)}
       style={{
         display: "flex",
@@ -1942,6 +1944,21 @@ function primaryBtn(bg) {
 }
 
 const MIGRATION_FLAG_KEY = "coupons:migratedToCloud";
+const PRODUCT_GROUP_SORT_MIGRATION_KEY = "coupons:productGroupSortV1";
+
+function initialSortKey() {
+  const saved = localStorage.getItem("coupons:sortKey");
+  // この機能の初回だけ新しい商品グループ順へ切り替える。以後はユーザーが
+  // 期限順・追加順へ変えた選択をそのまま尊重する。
+  if (!localStorage.getItem(PRODUCT_GROUP_SORT_MIGRATION_KEY)) {
+    localStorage.setItem(PRODUCT_GROUP_SORT_MIGRATION_KEY, "1");
+    localStorage.setItem("coupons:sortKey", "product");
+    return "product";
+  }
+  return ["product", "expiry", "created", "createdAsc"].includes(saved)
+    ? saved
+    : "product";
+}
 
 // この端末のlocalStorageに残っている旧データを、初回だけ家族共有クラウドに移行する。
 async function migrateLocalDataIfNeeded() {
@@ -2025,7 +2042,7 @@ export default function CouponApp() {
   const [storeFilter, setStoreFilter] = useState("all");
   const [daysFilter, setDaysFilter] = useState("");
   // 並び順は端末ごとの好みなのでlocalStorageに保持する
-  const [sortKey, setSortKey] = useState(() => localStorage.getItem("coupons:sortKey") || "expiry");
+  const [sortKey, setSortKey] = useState(initialSortKey);
   const [openCoupon, setOpenCoupon] = useState(null);
   const [detailPageTransition, setDetailPageTransition] = useState("");
   const detailPageTimersRef = useRef([]);
@@ -2482,6 +2499,7 @@ export default function CouponApp() {
         return d !== null && d >= 0 && d <= limit;
       });
     }
+    if (sortKey === "product") return sortCouponsByProduct(list);
     list.sort((a, b) => {
       if (sortKey === "created") return createdAtMs(b) - createdAtMs(a);
       if (sortKey === "createdAsc") return createdAtMs(a) - createdAtMs(b);
@@ -2824,6 +2842,7 @@ export default function CouponApp() {
         >
           <ArrowUpDown size={15} color={COLORS.muted} style={{ flexShrink: 0 }} />
           <select
+            aria-label="並び順"
             value={sortKey}
             onChange={(e) => {
               setSortKey(e.target.value);
@@ -2840,6 +2859,7 @@ export default function CouponApp() {
               color: COLORS.ink,
             }}
           >
+            <option value="product">同じ商品をまとめる</option>
             <option value="expiry">期限が近い順</option>
             <option value="created">追加が新しい順</option>
             <option value="createdAsc">追加が古い順</option>

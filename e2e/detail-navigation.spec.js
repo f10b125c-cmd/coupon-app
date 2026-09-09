@@ -78,6 +78,19 @@ test("詳細画面は件数だけを表示し、スワイプで前後移動す�
   const positionBox = await positionBadge.boundingBox();
   expect(Math.abs(statusBox.y - positionBox.y)).toBeLessThan(8);
   expect(positionBox.x).toBeGreaterThan(statusBox.x + statusBox.width);
+  const rescanButton = page.getByRole("button", { name: "読み取り直す", exact: true });
+  const editButton = page.getByRole("button", { name: "編集する", exact: true });
+  const closeButton = page.getByRole("button", { name: "閉じる", exact: true });
+  const [rescanBox, editBox, closeBox] = await Promise.all([
+    rescanButton.boundingBox(),
+    editButton.boundingBox(),
+    closeButton.boundingBox(),
+  ]);
+  expect(Math.abs(rescanBox.y - editBox.y)).toBeLessThan(8);
+  expect(Math.abs(editBox.y - closeBox.y)).toBeLessThan(8);
+  expect(editBox.x).toBeGreaterThan(rescanBox.x + rescanBox.width);
+  expect(closeBox.x).toBeGreaterThan(editBox.x + editBox.width);
+  expect(editBox.y).toBeGreaterThan(statusBox.y + statusBox.height);
   expect(
     await couponImage.evaluate((image) => {
       const rescan = image.closest(".sheet")?.querySelector('button[aria-label="読み取り直す"]');
@@ -85,6 +98,13 @@ test("詳細画面は件数だけを表示し、スワイプで前後移動す�
     })
   ).toBe(true);
   expect((await page.locator(".sheet").boundingBox()).y).toBeLessThan(24);
+
+  await editButton.click();
+  const autoReadBox = await page.getByRole("button", { name: "画像から自動読み取り", exact: true }).boundingBox();
+  const editingCloseBox = await page.getByRole("button", { name: "編集画面を閉じる", exact: true }).boundingBox();
+  expect(Math.abs(autoReadBox.y - editingCloseBox.y)).toBeLessThan(8);
+  expect(editingCloseBox.x).toBeGreaterThan(autoReadBox.x + autoReadBox.width);
+  await page.getByRole("button", { name: "編集画面を閉じる", exact: true }).click();
 
   await page.evaluate(() => {
     window.__detailPageTransitions = [];

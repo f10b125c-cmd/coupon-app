@@ -1343,6 +1343,24 @@ function DetailModal({
       )}
     </>
   );
+  const editAndCloseButtons = (
+    <>
+      <button
+        onClick={() => setEditing((value) => !value)}
+        aria-label={editing ? "編集画面を閉じる" : "編集する"}
+        style={{ ...iconBtnStyle, width: 44, height: 44, flexShrink: 0 }}
+      >
+        {editing ? <Check size={20} color={COLORS.forest} /> : <Pencil size={19} color={COLORS.ink} />}
+      </button>
+      <button
+        onClick={onClose}
+        aria-label="閉じる"
+        style={{ ...iconBtnStyle, width: 44, height: 44, flexShrink: 0 }}
+      >
+        <X size={22} color={COLORS.ink} />
+      </button>
+    </>
+  );
   return (
     <div
       style={{
@@ -1408,18 +1426,10 @@ function DetailModal({
             <span>上へスワイプで使用済み</span>
           </div>
         )}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
             <StampBadge status={status} />
             <CouponPositionBadge position={position} />
-          </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <button onClick={() => setEditing((v) => !v)} style={{ ...iconBtnStyle, width: 44, height: 44 }}>
-              {editing ? <Check size={20} color={COLORS.forest} /> : <Pencil size={19} color={COLORS.ink} />}
-            </button>
-            <button onClick={onClose} aria-label="閉じる" style={{ ...iconBtnStyle, width: 44, height: 44 }}>
-              <X size={22} color={COLORS.ink} />
-            </button>
           </div>
         </div>
 
@@ -1463,17 +1473,28 @@ function DetailModal({
               </div>
             )}
             {!productImageDataUrl && editableCouponImageSection}
-            {imageDataUrl && (
-              <div style={{ marginBottom: 14 }}>
+            <div
+              data-detail-action-row
+              style={{
+                display: "flex",
+                justifyContent: imageDataUrl ? "flex-start" : "flex-end",
+                alignItems: "center",
+                gap: 8,
+                marginBottom: scanMessage && imageDataUrl ? 6 : 14,
+              }}
+            >
+              {imageDataUrl && (
                 <button
                   onClick={() => autoScan()}
                   disabled={scanning}
+                  aria-label="画像から自動読み取り"
                   style={{
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
                     gap: 6,
-                    width: "100%",
+                    flex: 1,
+                    minWidth: 0,
                     padding: "10px 12px",
                     borderRadius: 10,
                     border: `1.5px solid ${COLORS.forest}`,
@@ -1488,18 +1509,19 @@ function DetailModal({
                   <ScanLine size={15} />
                   {scanning ? "読み取り中…" : "画像から自動読み取り"}
                 </button>
-                {scanMessage && (
-                  <div
-                    style={{
-                      marginTop: 6,
-                      fontFamily: "'M PLUS Rounded 1c', sans-serif",
-                      fontSize: 12,
-                      color: COLORS.muted,
-                    }}
-                  >
-                    {scanMessage}
-                  </div>
-                )}
+              )}
+              {editAndCloseButtons}
+            </div>
+            {scanMessage && imageDataUrl && (
+              <div
+                style={{
+                  marginBottom: 14,
+                  fontFamily: "'M PLUS Rounded 1c', sans-serif",
+                  fontSize: 12,
+                  color: COLORS.muted,
+                }}
+              >
+                {scanMessage}
               </div>
             )}
             <label style={fieldLabel}>
@@ -1695,8 +1717,17 @@ function DetailModal({
               </div>
             )}
 
-            {coupon.imageDataUrl && (
-              <div style={{ marginBottom: 12 }}>
+            <div
+              data-detail-action-row
+              style={{
+                display: "flex",
+                justifyContent: coupon.imageDataUrl ? "flex-start" : "flex-end",
+                alignItems: "center",
+                gap: 8,
+                marginBottom: scanMessage && coupon.imageDataUrl ? 6 : 12,
+              }}
+            >
+              {coupon.imageDataUrl && (
                 <button
                   onClick={rescanAndOverwrite}
                   disabled={scanning}
@@ -1706,7 +1737,8 @@ function DetailModal({
                     alignItems: "center",
                     justifyContent: "center",
                     gap: 6,
-                    width: "100%",
+                    flex: 1,
+                    minWidth: 0,
                     padding: "11px 12px",
                     borderRadius: 10,
                     border: `1.5px solid ${COLORS.forest}`,
@@ -1721,18 +1753,19 @@ function DetailModal({
                   <ScanLine size={15} />
                   {scanning ? "読み取り中…" : "読み取り直す"}
                 </button>
-                {scanMessage && (
-                  <div
-                    style={{
-                      marginTop: 6,
-                      fontFamily: "'M PLUS Rounded 1c', sans-serif",
-                      fontSize: 12,
-                      color: COLORS.muted,
-                    }}
-                  >
-                    {scanMessage}
-                  </div>
-                )}
+              )}
+              {editAndCloseButtons}
+            </div>
+            {scanMessage && coupon.imageDataUrl && (
+              <div
+                style={{
+                  marginBottom: 12,
+                  fontFamily: "'M PLUS Rounded 1c', sans-serif",
+                  fontSize: 12,
+                  color: COLORS.muted,
+                }}
+              >
+                {scanMessage}
               </div>
             )}
 

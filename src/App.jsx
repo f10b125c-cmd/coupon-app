@@ -1680,53 +1680,61 @@ function DetailModal({
               data-detail-action-row
               style={{
                 display: "flex",
-                justifyContent: coupon.imageDataUrl ? "flex-start" : "flex-end",
+                justifyContent: "flex-start",
                 alignItems: "center",
                 gap: 8,
-                marginBottom: scanMessage && coupon.imageDataUrl ? 6 : 12,
+                marginBottom: 12,
               }}
             >
-              {coupon.imageDataUrl && (
+              {status !== "used" ? (
                 <button
-                  onClick={rescanAndOverwrite}
-                  disabled={scanning}
-                  aria-label="読み取り直す"
+                  onClick={markUsed}
+                  aria-label="使用済みにする"
                   style={{
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    gap: 6,
                     flex: 1,
                     minWidth: 0,
                     padding: "11px 12px",
                     borderRadius: 10,
-                    border: `1.5px solid ${COLORS.forest}`,
-                    background: scanning ? COLORS.line : COLORS.forestSoft,
-                    color: COLORS.forest,
+                    border: "none",
+                    background: COLORS.crimson,
+                    color: COLORS.paper,
                     fontFamily: "'M PLUS Rounded 1c', sans-serif",
                     fontWeight: 700,
                     fontSize: 13,
-                    cursor: scanning ? "not-allowed" : "pointer",
+                    cursor: "pointer",
                   }}
                 >
-                  <ScanLine size={15} />
-                  {scanning ? "読み取り中…" : "読み取り直す"}
+                  使用済みにする
+                </button>
+              ) : (
+                <button
+                  onClick={markUnused}
+                  aria-label="未使用に戻す"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flex: 1,
+                    minWidth: 0,
+                    padding: "11px 12px",
+                    borderRadius: 10,
+                    border: "none",
+                    background: COLORS.forest,
+                    color: COLORS.paper,
+                    fontFamily: "'M PLUS Rounded 1c', sans-serif",
+                    fontWeight: 700,
+                    fontSize: 13,
+                    cursor: "pointer",
+                  }}
+                >
+                  未使用に戻す
                 </button>
               )}
               {editAndCloseButtons}
             </div>
-            {scanMessage && coupon.imageDataUrl && (
-              <div
-                style={{
-                  marginBottom: 12,
-                  fontFamily: "'M PLUS Rounded 1c', sans-serif",
-                  fontSize: 12,
-                  color: COLORS.muted,
-                }}
-              >
-                {scanMessage}
-              </div>
-            )}
 
             <h2
               style={{
@@ -1896,14 +1904,45 @@ function DetailModal({
               </button>
             )}
 
-            {status !== "used" ? (
-              <button onClick={markUsed} style={primaryBtn(COLORS.crimson)}>
-                使用済みにする
-              </button>
-            ) : (
-              <button onClick={markUnused} style={primaryBtn(COLORS.forest)}>
-                未使用に戻す
-              </button>
+            {coupon.imageDataUrl && (
+              <div>
+                <button
+                  onClick={rescanAndOverwrite}
+                  disabled={scanning}
+                  aria-label="読み取り直す"
+                  style={{
+                    width: "100%",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 6,
+                    padding: "13px 12px",
+                    borderRadius: 10,
+                    border: `1.5px solid ${COLORS.forest}`,
+                    background: scanning ? COLORS.line : COLORS.forestSoft,
+                    color: COLORS.forest,
+                    fontFamily: "'M PLUS Rounded 1c', sans-serif",
+                    fontWeight: 700,
+                    fontSize: 14,
+                    cursor: scanning ? "not-allowed" : "pointer",
+                  }}
+                >
+                  <ScanLine size={15} />
+                  {scanning ? "読み取り中…" : "読み取り直す"}
+                </button>
+                {scanMessage && (
+                  <div
+                    style={{
+                      marginTop: 6,
+                      fontFamily: "'M PLUS Rounded 1c', sans-serif",
+                      fontSize: 12,
+                      color: COLORS.muted,
+                    }}
+                  >
+                    {scanMessage}
+                  </div>
+                )}
+              </div>
             )}
 
             <button

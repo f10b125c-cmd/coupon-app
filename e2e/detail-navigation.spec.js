@@ -78,19 +78,22 @@ test("詳細画面は件数だけを表示し、スワイプで前後移動す�
   const positionBox = await positionBadge.boundingBox();
   expect(Math.abs(statusBox.y - positionBox.y)).toBeLessThan(8);
   expect(positionBox.x).toBeGreaterThan(statusBox.x + statusBox.width);
+  const usedButton = page.getByRole("button", { name: "使用済みにする", exact: true });
   const rescanButton = page.getByRole("button", { name: "読み取り直す", exact: true });
   const editButton = page.getByRole("button", { name: "編集する", exact: true });
   const closeButton = page.getByRole("button", { name: "閉じる", exact: true });
-  const [rescanBox, editBox, closeBox] = await Promise.all([
+  const [usedBox, rescanBox, editBox, closeBox] = await Promise.all([
+    usedButton.boundingBox(),
     rescanButton.boundingBox(),
     editButton.boundingBox(),
     closeButton.boundingBox(),
   ]);
-  expect(Math.abs(rescanBox.y - editBox.y)).toBeLessThan(8);
+  expect(Math.abs(usedBox.y - editBox.y)).toBeLessThan(8);
   expect(Math.abs(editBox.y - closeBox.y)).toBeLessThan(8);
-  expect(editBox.x).toBeGreaterThan(rescanBox.x + rescanBox.width);
+  expect(editBox.x).toBeGreaterThan(usedBox.x + usedBox.width);
   expect(closeBox.x).toBeGreaterThan(editBox.x + editBox.width);
   expect(editBox.y).toBeGreaterThan(statusBox.y + statusBox.height);
+  expect(rescanBox.y).toBeGreaterThan(usedBox.y + usedBox.height);
   expect(
     await couponImage.evaluate((image) => {
       const rescan = image.closest(".sheet")?.querySelector('button[aria-label="読み取り直す"]');

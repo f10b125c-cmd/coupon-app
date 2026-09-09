@@ -80,11 +80,13 @@ test("詳細画面は件数だけを表示し、スワイプで前後移動す�
   expect(positionBox.x).toBeGreaterThan(statusBox.x + statusBox.width);
   const usedButton = page.getByRole("button", { name: "使用済みにする", exact: true });
   const rescanButton = page.getByRole("button", { name: "読み取り直す", exact: true });
+  const lensButton = page.getByRole("button", { name: "Google Lensで商品名を調べる", exact: true });
   const editButton = page.getByRole("button", { name: "編集する", exact: true });
   const closeButton = page.getByRole("button", { name: "閉じる", exact: true });
-  const [usedBox, rescanBox, editBox, closeBox] = await Promise.all([
+  const [usedBox, rescanBox, lensBox, editBox, closeBox] = await Promise.all([
     usedButton.boundingBox(),
     rescanButton.boundingBox(),
+    lensButton.boundingBox(),
     editButton.boundingBox(),
     closeButton.boundingBox(),
   ]);
@@ -94,6 +96,7 @@ test("詳細画面は件数だけを表示し、スワイプで前後移動す�
   expect(closeBox.x).toBeGreaterThan(editBox.x + editBox.width);
   expect(editBox.y).toBeGreaterThan(statusBox.y + statusBox.height);
   expect(rescanBox.y).toBeGreaterThan(usedBox.y + usedBox.height);
+  expect(lensBox.y).toBeGreaterThan(rescanBox.y + rescanBox.height);
   expect(
     await couponImage.evaluate((image) => {
       const rescan = image.closest(".sheet")?.querySelector('button[aria-label="読み取り直す"]');

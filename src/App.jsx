@@ -1774,6 +1774,46 @@ function DetailModal({
                   background: "#FFF9F6",
                 }}
               >
+                {coupon.imageDataUrl && (
+                  <div style={{ marginBottom: 10 }}>
+                    <button
+                      onClick={rescanAndOverwrite}
+                      disabled={scanning}
+                      aria-label="読み取り直す"
+                      style={{
+                        width: "100%",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 6,
+                        padding: "13px 12px",
+                        borderRadius: 10,
+                        border: `1.5px solid ${COLORS.forest}`,
+                        background: scanning ? COLORS.line : COLORS.forestSoft,
+                        color: COLORS.forest,
+                        fontFamily: "'M PLUS Rounded 1c', sans-serif",
+                        fontWeight: 700,
+                        fontSize: 14,
+                        cursor: scanning ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      <ScanLine size={15} />
+                      {scanning ? "読み取り中…" : "読み取り直す"}
+                    </button>
+                    {scanMessage && (
+                      <div
+                        style={{
+                          marginTop: 6,
+                          fontFamily: "'M PLUS Rounded 1c', sans-serif",
+                          fontSize: 12,
+                          color: COLORS.muted,
+                        }}
+                      >
+                        {scanMessage}
+                      </div>
+                    )}
+                  </div>
+                )}
                 <button
                   onClick={searchProductWithGoogleLens}
                   disabled={lensBusy}
@@ -1902,47 +1942,6 @@ function DetailModal({
               >
                 内容を登録する
               </button>
-            )}
-
-            {coupon.imageDataUrl && (
-              <div>
-                <button
-                  onClick={rescanAndOverwrite}
-                  disabled={scanning}
-                  aria-label="読み取り直す"
-                  style={{
-                    width: "100%",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 6,
-                    padding: "13px 12px",
-                    borderRadius: 10,
-                    border: `1.5px solid ${COLORS.forest}`,
-                    background: scanning ? COLORS.line : COLORS.forestSoft,
-                    color: COLORS.forest,
-                    fontFamily: "'M PLUS Rounded 1c', sans-serif",
-                    fontWeight: 700,
-                    fontSize: 14,
-                    cursor: scanning ? "not-allowed" : "pointer",
-                  }}
-                >
-                  <ScanLine size={15} />
-                  {scanning ? "読み取り中…" : "読み取り直す"}
-                </button>
-                {scanMessage && (
-                  <div
-                    style={{
-                      marginTop: 6,
-                      fontFamily: "'M PLUS Rounded 1c', sans-serif",
-                      fontSize: 12,
-                      color: COLORS.muted,
-                    }}
-                  >
-                    {scanMessage}
-                  </div>
-                )}
-              </div>
             )}
 
             <button

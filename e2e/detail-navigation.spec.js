@@ -142,8 +142,10 @@ test("詳細画面は件数だけを表示し、スワイプで前後移動す�
     .toEqual(["idle", "leave-next", "enter-next"]);
 });
 
-test("上スワイプと使用済みボタンは詳細を閉じず次のクーポンへ進む", async ({ page }) => {
+test("使用済みボタンは詳細を閉じず次のクーポンへ進む", async ({ page }) => {
   await page.getByText("クーリッシュ バニラ", { exact: true }).click();
+  await expect(page.getByText("上へスワイプで使用済み")).toHaveCount(0);
+  await expect(page.locator("[data-use-swipe-handle]")).toHaveCount(0);
   await page.evaluate(() => {
     window.__detailPageTransitions = [];
     const record = () => {
@@ -161,17 +163,7 @@ test("上スワイプと使用済みボタンは詳細を閉じず次のクー�
     });
   });
 
-  await page.getByRole("button", { name: "上にスワイプして使用済みにする" }).evaluate((handle) => {
-    const dispatchTouch = (type, clientY) => {
-      const event = new Event(type, { bubbles: true, cancelable: true });
-      Object.defineProperty(event, type === "touchstart" ? "touches" : "changedTouches", {
-        value: [{ clientX: 200, clientY }],
-      });
-      handle.dispatchEvent(event);
-    };
-    dispatchTouch("touchstart", 360);
-    dispatchTouch("touchend", 220);
-  });
+  await page.getByRole("button", { name: "使用済みにする", exact: true }).click();
 
   await expect(page.getByRole("heading", { name: "アイスの実 ぶどうマスカット" })).toBeVisible();
   await expect(page.locator(".sheet")).toBeVisible();

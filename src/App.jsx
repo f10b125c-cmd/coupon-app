@@ -853,7 +853,7 @@ function DetailModal({
   const [lensMessage, setLensMessage] = useState("");
   const [lensRegistrationOpen, setLensRegistrationOpen] = useState(false);
   const [lensProductName, setLensProductName] = useState("");
-  const touchStartRef = useRef({ x: 0, y: 0, canMarkUsed: false });
+  const touchStartRef = useRef({ x: 0, y: 0 });
   const barcodeCropPromiseRef = useRef(null);
   const latestCouponRef = useRef(coupon);
   latestCouponRef.current = coupon;
@@ -881,11 +881,7 @@ function DetailModal({
 
   function handleTouchStart(e) {
     const t = e.touches[0];
-    touchStartRef.current = {
-      x: t.clientX,
-      y: t.clientY,
-      canMarkUsed: Boolean(e.target.closest?.("[data-use-swipe-handle]")),
-    };
+    touchStartRef.current = { x: t.clientX, y: t.clientY };
   }
 
   function handleTouchEnd(e) {
@@ -895,13 +891,6 @@ function DetailModal({
     if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
       if (dx < 0 && onNext) onNext();
       else if (dx > 0 && onPrev) onPrev();
-    } else if (
-      touchStartRef.current.canMarkUsed &&
-      status !== "used" &&
-      dy < -60 &&
-      Math.abs(dy) > Math.abs(dx) * 1.25
-    ) {
-      markUsed();
     }
   }
 
@@ -1396,36 +1385,6 @@ function DetailModal({
           overflowY: "auto",
         }}
       >
-        {!editing && status !== "used" && (
-          <div
-            data-use-swipe-handle
-            role="button"
-            aria-label="上にスワイプして使用済みにする"
-            style={{
-              height: 24,
-              marginTop: -8,
-              marginBottom: -2,
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 2,
-              color: COLORS.muted,
-              fontFamily: "'M PLUS Rounded 1c', sans-serif",
-              fontSize: 9,
-              fontWeight: 700,
-              touchAction: "none",
-              cursor: "grab",
-              userSelect: "none",
-            }}
-          >
-            <span
-              aria-hidden="true"
-              style={{ width: 38, height: 4, borderRadius: 999, background: COLORS.line }}
-            />
-            <span>上へスワイプで使用済み</span>
-          </div>
-        )}
         <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
             <StampBadge status={status} />

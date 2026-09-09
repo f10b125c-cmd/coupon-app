@@ -11,9 +11,17 @@ test("券種・メーカー・価格・空白が違っても同じ商品キー�
     normalizeProductGroupKey("【お持ち帰り限定】 クーリッシュ　バニラ（税込194円）無料引換券"),
     normalizeProductGroupKey("ロッテ クーリッシュ バニラ")
   );
-  assert.notEqual(
+  assert.equal(
     normalizeProductGroupKey("翠ジンソーダ 350ml缶"),
     normalizeProductGroupKey("翠ジンソーダ 500ml缶")
+  );
+  assert.notEqual(
+    normalizeProductGroupKey("翠ジンソーダ 5% 350ml缶"),
+    normalizeProductGroupKey("翠ジンソーダ 7% 500ml缶")
+  );
+  assert.notEqual(
+    normalizeProductGroupKey("クーリッシュ バニラ 140ml"),
+    normalizeProductGroupKey("クーリッシュ チョコ 140ml")
   );
 });
 

@@ -81,13 +81,23 @@ function useSheetStyles() {
       "  from { transform: translate3d(-58%, 0, 0); opacity: 0.25; }",
       "  to { transform: translate3d(0, 0, 0); opacity: 1; }",
       "}",
+      "@keyframes coupon-page-leave-used {",
+      "  from { transform: translate3d(0, 0, 0); opacity: 1; }",
+      "  to { transform: translate3d(0, -32%, 0); opacity: 0.15; }",
+      "}",
+      "@keyframes coupon-page-enter-used {",
+      "  from { transform: translate3d(0, 48%, 0); opacity: 0.2; }",
+      "  to { transform: translate3d(0, 0, 0); opacity: 1; }",
+      "}",
       ".coupon-page-leave-next { animation: coupon-page-leave-next 130ms ease-in both; pointer-events: none; }",
       ".coupon-page-leave-prev { animation: coupon-page-leave-prev 130ms ease-in both; pointer-events: none; }",
+      ".coupon-page-leave-used { animation: coupon-page-leave-used 130ms ease-in both; pointer-events: none; }",
       ".coupon-page-enter-next { animation: coupon-page-enter-next 240ms cubic-bezier(.2,.8,.2,1) both; }",
       ".coupon-page-enter-prev { animation: coupon-page-enter-prev 240ms cubic-bezier(.2,.8,.2,1) both; }",
+      ".coupon-page-enter-used { animation: coupon-page-enter-used 240ms cubic-bezier(.2,.8,.2,1) both; }",
       "@media (prefers-reduced-motion: reduce) {",
-      "  .coupon-page-leave-next, .coupon-page-leave-prev,",
-      "  .coupon-page-enter-next, .coupon-page-enter-prev { animation: none !important; }",
+      "  .coupon-page-leave-next, .coupon-page-leave-prev, .coupon-page-leave-used,",
+      "  .coupon-page-enter-next, .coupon-page-enter-prev, .coupon-page-enter-used { animation: none !important; }",
       "}",
       "@media (max-width: 359px) {",
       "  .family-portal-link { width: 40px; padding: 0 !important; }",
@@ -809,7 +819,18 @@ function CouponPositionBadge({ position }) {
   );
 }
 
-function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onNext, position, pageTransition }) {
+function DetailModal({
+  coupon,
+  coupons,
+  onClose,
+  onUpdate,
+  onDelete,
+  onPrev,
+  onNext,
+  onMarkUsed,
+  position,
+  pageTransition,
+}) {
   const [editing, setEditing] = useState(!!coupon.inbox);
   const [productName, setProductName] = useState(coupon.productName);
   const [url, setUrl] = useState(coupon.url || "");
@@ -832,7 +853,7 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
   const [lensMessage, setLensMessage] = useState("");
   const [lensRegistrationOpen, setLensRegistrationOpen] = useState(false);
   const [lensProductName, setLensProductName] = useState("");
-  const touchStartRef = useRef({ x: 0, y: 0 });
+  const touchStartRef = useRef({ x: 0, y: 0, canMarkUsed: false });
   const barcodeCropPromiseRef = useRef(null);
   const latestCouponRef = useRef(coupon);
   latestCouponRef.current = coupon;
@@ -860,7 +881,11 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
 
   function handleTouchStart(e) {
     const t = e.touches[0];
-    touchStartRef.current = { x: t.clientX, y: t.clientY };
+    touchStartRef.current = {
+      x: t.clientX,
+      y: t.clientY,
+      canMarkUsed: Boolean(e.target.closest?.("[data-use-swipe-handle]")),
+    };
   }
 
   function handleTouchEnd(e) {
@@ -870,6 +895,13 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
     if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
       if (dx < 0 && onNext) onNext();
       else if (dx > 0 && onPrev) onPrev();
+    } else if (
+      touchStartRef.current.canMarkUsed &&
+      status !== "used" &&
+      dy < -60 &&
+      Math.abs(dy) > Math.abs(dx) * 1.25
+    ) {
+      markUsed();
     }
   }
 
@@ -1055,14 +1087,15 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
   }
 
   function markUsed() {
-    onUpdate({
+    const updated = {
       ...coupon,
       status: "used",
       inbox: false,
       usedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-    });
-    onClose();
+    };
+    if (onMarkUsed) onMarkUsed(updated);
+    else onUpdate(updated);
   }
 
   // クーポンを開いたまま、その1件を読み取り直す。
@@ -1345,6 +1378,36 @@ function DetailModal({ coupon, coupons, onClose, onUpdate, onDelete, onPrev, onN
           overflowY: "auto",
         }}
       >
+        {!editing && status !== "used" && (
+          <div
+            data-use-swipe-handle
+            role="button"
+            aria-label="上にスワイプして使用済みにする"
+            style={{
+              height: 24,
+              marginTop: -8,
+              marginBottom: -2,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 2,
+              color: COLORS.muted,
+              fontFamily: "'M PLUS Rounded 1c', sans-serif",
+              fontSize: 9,
+              fontWeight: 700,
+              touchAction: "none",
+              cursor: "grab",
+              userSelect: "none",
+            }}
+          >
+            <span
+              aria-hidden="true"
+              style={{ width: 38, height: 4, borderRadius: 999, background: COLORS.line }}
+            />
+            <span>上へスワイプで使用済み</span>
+          </div>
+        )}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
             <StampBadge status={status} />
@@ -2515,6 +2578,16 @@ export default function CouponApp() {
 
   const openIndex = openCoupon ? filtered.findIndex((c) => c.id === openCoupon.id) : -1;
 
+  // 使用済み操作の直前に現在の一覧から次の券を確保しておく。更新後は現在の券が
+  // 未使用タブから外れるため、先に確保しないと次の券を特定できなくなる。
+  function markOpenCouponUsedAndAdvance(updatedCoupon) {
+    if (!updatedCoupon || detailPageMovingRef.current) return;
+    const currentIndex = filtered.findIndex((c) => c.id === updatedCoupon.id);
+    const nextCoupon = currentIndex >= 0 ? filtered[currentIndex + 1] : null;
+    updateCoupon(updatedCoupon);
+    if (nextCoupon) moveCouponDetail(nextCoupon, "used");
+  }
+
   const counts = useMemo(() => {
     const c = { inbox: 0, unused: 0, used: 0, expired: 0 };
     coupons.forEach((cp) => {
@@ -3100,6 +3173,7 @@ export default function CouponApp() {
           onClose={closeCouponDetail}
           onUpdate={updateCoupon}
           onDelete={deleteCoupon}
+          onMarkUsed={markOpenCouponUsedAndAdvance}
           onPrev={
             openIndex > 0
               ? () => moveCouponDetail(filtered[openIndex - 1], "prev")

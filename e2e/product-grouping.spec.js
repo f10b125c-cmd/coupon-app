@@ -7,6 +7,8 @@ const coupons = [
   { id: "cool-soon", productName: "【お持ち帰り限定】クーリッシュ バニラ（税込194円）", expiresAt: "2026-09-12" },
   { id: "tako-one", productName: "サントリー こだわり酒場のタコハイ 1本", expiresAt: "2026-09-14" },
   { id: "tako-plain", productName: "こだわり酒場のタコハイ", expiresAt: "2026-09-15" },
+  { id: "sui-500", productName: "翠ジンソーダ 500ml缶", expiresAt: "2026-09-17" },
+  { id: "sui-350", productName: "サントリー 翠ジンソーダ 350ml缶", expiresAt: "2026-09-16" },
 ].map((coupon, index) => ({
   ...coupon,
   imageDataUrl: null,
@@ -58,10 +60,19 @@ test("同じ商品を一覧とスワイプ順で隣り合わせにする", async
     await page.locator("button[data-coupon-id]").evaluateAll((cards) =>
       cards.map((card) => card.dataset.couponId)
     )
-  ).toEqual(["ice", "cool-soon", "cool-late", "choco", "tako-one", "tako-plain"]);
+  ).toEqual([
+    "ice",
+    "cool-soon",
+    "cool-late",
+    "choco",
+    "tako-one",
+    "tako-plain",
+    "sui-350",
+    "sui-500",
+  ]);
 
   await page.locator('button[data-coupon-id="cool-soon"]').click();
-  await expect(page.getByLabel("全6件中 2件目")).toBeVisible();
+  await expect(page.getByLabel("全8件中 2件目")).toBeVisible();
   await page.locator(".sheet").evaluate((sheet) => {
     const dispatchTouch = (type, clientX) => {
       const event = new Event(type, { bubbles: true, cancelable: true });
@@ -75,5 +86,5 @@ test("同じ商品を一覧とスワイプ順で隣り合わせにする", async
   });
 
   await expect(page.getByRole("heading", { name: "ロッテ クーリッシュ バニラ" })).toBeVisible();
-  await expect(page.getByLabel("全6件中 3件目")).toBeVisible();
+  await expect(page.getByLabel("全8件中 3件目")).toBeVisible();
 });

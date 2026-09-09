@@ -12,7 +12,7 @@ function createdMs(coupon) {
 }
 
 // OCRや手入力で付きやすい券種・メーカー・価格表記を除き、同じ商品を
-// 並べて比較するためのキーにする。容量・味・度数など商品差は残す。
+// 並べて比較するためのキーにする。容量違いはまとめ、味・度数など商品差は残す。
 export function normalizeProductGroupKey(productName) {
   return String(productName || "")
     .normalize("NFKC")
@@ -22,6 +22,8 @@ export function normalizeProductGroupKey(productName) {
     .replace(/(?:いずれか)?\s*\d*\s*本\s*(?:無料)?\s*引(?:き)?換(?:え)?(?:券|クーポン)?/g, "")
     .replace(/(?:無料)?\s*引(?:き)?換(?:え)?(?:券|クーポン)/g, "")
     .replace(/(?:ロッテ|サントリー|アサヒ|キリン|森永乳業|森永製菓|赤城乳業)/g, "")
+    // 350mlと500mlなど、容量だけ違う同一シリーズは隣にまとめる。
+    .replace(/\d+(?:\.\d+)?\s*(?:ml|kg|l|g)\s*(?:缶|瓶|本|パック)?/g, "")
     // OCR結果によって券の数量だけが商品名末尾に残るケースを揃える。
     // 「1本満足バー」のように後ろへ商品名が続く場合は除去しない。
     .replace(/(?:1|一)\s*本(?:[\s\p{P}\p{S}]*)$/gu, "")

@@ -30,6 +30,7 @@ test.beforeEach(async ({ page }) => {
   await page.clock.setFixedTime(new Date("2026-09-07T00:00:00Z"));
   await page.addInitScript((initialCoupons) => {
     window.__navigationCoupons = initialCoupons;
+    window.__savedCoupons = [];
   }, coupons);
   await page.route(/https:\/\/[^/]*(?:googleapis\.com|firebaseio\.com)\//, (route) => {
     if (route.request().url().startsWith("https://fonts.googleapis.com/")) return route.continue();
@@ -40,7 +41,7 @@ test.beforeEach(async ({ page }) => {
       contentType: "application/javascript",
       body: `
         export async function subscribeCoupons(fn) { fn(window.__navigationCoupons); return () => {}; }
-        export async function saveCouponToCloud() { throw new Error("Writes forbidden"); }
+        export async function saveCouponToCloud(coupon) { window.__savedCoupons.push(coupon); }
         export async function deleteCouponFromCloud() { throw new Error("Deletion forbidden"); }
         export async function compressImageForStorage(data) { return data; }
       `,
@@ -119,4 +120,63 @@ test("詳細画面は件数だけを表示し、スワイプで前後移動す�
   await expect
     .poll(() => page.evaluate(() => window.__detailPageTransitions.slice(0, 3)))
     .toEqual(["idle", "leave-next", "enter-next"]);
+});
+
+test("上スワイプと使用済みボタンは詳細を閉じず次のクーポンへ進む", async ({ page }) => {
+  await page.getByText("クーリッシュ バニラ", { exact: true }).click();
+  await page.evaluate(() => {
+    window.__detailPageTransitions = [];
+    const record = () => {
+      const value = document.querySelector(".sheet")?.dataset.pageTransition;
+      if (value && window.__detailPageTransitions.at(-1) !== value) {
+        window.__detailPageTransitions.push(value);
+      }
+    };
+    record();
+    new MutationObserver(record).observe(document.body, {
+      attributes: true,
+      attributeFilter: ["data-page-transition"],
+      childList: true,
+      subtree: true,
+    });
+  });
+
+  await page.getByRole("button", { name: "上にスワイプして使用済みにする" }).evaluate((handle) => {
+    const dispatchTouch = (type, clientY) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperty(event, type === "touchstart" ? "touches" : "changedTouches", {
+        value: [{ clientX: 200, clientY }],
+      });
+      handle.dispatchEvent(event);
+    };
+    dispatchTouch("touchstart", 360);
+    dispatchTouch("touchend", 220);
+  });
+
+  await expect(page.getByRole("heading", { name: "アイスの実 ぶどうマスカット" })).toBeVisible();
+  await expect(page.locator(".sheet")).toBeVisible();
+  await expect(page.getByLabel("全2件中 1件目")).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => window.__savedCoupons.map((coupon) => [coupon.id, coupon.status])))
+    .toEqual([["nav-1", "used"]]);
+  await expect
+    .poll(() => page.evaluate(() => window.__detailPageTransitions.slice(0, 3)))
+    .toEqual(["idle", "leave-used", "enter-used"]);
+
+  await page.getByRole("button", { name: "使用済みにする", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "チョコモナカジャンボ" })).toBeVisible();
+  await expect(page.locator(".sheet")).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => window.__savedCoupons.map((coupon) => [coupon.id, coupon.status])))
+    .toEqual([
+      ["nav-1", "used"],
+      ["nav-2", "used"],
+    ]);
+
+  // 最後の1枚は次がないため、使用済み表示へ変えて詳細を開いたままにする。
+  await page.getByRole("button", { name: "使用済みにする", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "チョコモナカジャンボ" })).toBeVisible();
+  await expect(page.locator(".sheet").getByText("使用済み", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "未使用に戻す" })).toBeVisible();
+  await expect(page.locator(".sheet")).toBeVisible();
 });

@@ -13,9 +13,10 @@ const coupons = [
   { id: "nav-3", productName: "チョコモナカジャンボ", expiresAt: "2026-09-24" },
 ].map((coupon) => ({
   ...coupon,
-  imageDataUrl: BARCODE_IMAGE,
-  productImageDataUrl: COUPON_IMAGE,
-  barcodeImageDataUrl: null,
+  imageDataUrl: COUPON_IMAGE,
+  productImageDataUrl: null,
+  barcodeImageDataUrl: BARCODE_IMAGE,
+  couponPreviewImageDataUrl: COUPON_IMAGE,
   store: "lawson",
   barcode: "",
   memo: "",
@@ -76,8 +77,27 @@ test("詳細画面は件数だけを表示し、スワイプで前後移動す�
   await expect(barcodeImage).toBeVisible();
   const statusBox = await page.locator(".sheet").getByText("未使用", { exact: true }).boundingBox();
   const positionBox = await positionBadge.boundingBox();
+  const topImageLabel = page.locator("[data-detail-top-image-label]");
+  const topImageLabelBox = await topImageLabel.boundingBox();
+  const barcodePanelBox = await page.locator('[data-detail-image="barcode"]').boundingBox();
+  const couponPanelBox = await page.locator('[data-detail-image="coupon"]').boundingBox();
+  const couponImageLabel = page.locator("[data-detail-image-overlay-label]");
+  const couponImageLabelBox = await couponImageLabel.boundingBox();
+  await expect(topImageLabel).toHaveText("バーコード");
+  await expect(couponImageLabel).toHaveText("商品部分（自動切り出し）");
   expect(Math.abs(statusBox.y - positionBox.y)).toBeLessThan(8);
   expect(positionBox.x).toBeGreaterThan(statusBox.x + statusBox.width);
+  expect(Math.abs(positionBox.y - topImageLabelBox.y)).toBeLessThan(8);
+  expect(topImageLabelBox.x).toBeGreaterThan(positionBox.x + positionBox.width);
+  expect(barcodePanelBox.y).toBeGreaterThan(topImageLabelBox.y);
+  expect(barcodePanelBox.y - (topImageLabelBox.y + topImageLabelBox.height)).toBeLessThan(8);
+  expect(couponImageLabelBox.x + couponImageLabelBox.width).toBeLessThanOrEqual(
+    couponPanelBox.x + couponPanelBox.width
+  );
+  expect(couponImageLabelBox.y).toBeGreaterThanOrEqual(couponPanelBox.y);
+  expect(couponImageLabelBox.y + couponImageLabelBox.height).toBeLessThan(
+    couponPanelBox.y + couponPanelBox.height
+  );
   const usedButton = page.getByRole("button", { name: "使用済みにする", exact: true });
   const rescanButton = page.getByRole("button", { name: "読み取り直す", exact: true });
   const lensButton = page.getByRole("button", { name: "Google Lensで商品名を調べる", exact: true });

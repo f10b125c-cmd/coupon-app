@@ -1232,6 +1232,15 @@ function DetailModal({
   const showingCroppedCouponPreview = Boolean(
     !productImageDataUrl && couponPreviewImageDataUrl
   );
+  const firstViewImageLabel = displayedBarcodeImageDataUrl
+    ? "バーコード"
+    : coupon.productImageDataUrl
+      ? "商品画像"
+      : displayedCouponImageDataUrl
+        ? showingCroppedCouponPreview
+          ? "商品部分（自動切り出し）"
+          : "クーポン画像"
+        : null;
 
   const editableCouponImageSection = (
     <>
@@ -1385,11 +1394,24 @@ function DetailModal({
           overflowY: "auto",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 8,
+            marginBottom: 0,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 7, flexShrink: 0 }}>
             <StampBadge status={status} />
             <CouponPositionBadge position={position} />
           </div>
+          {!editing && firstViewImageLabel && (
+            <span data-detail-top-image-label style={detailImageLabelStyle}>
+              {firstViewImageLabel}
+            </span>
+          )}
         </div>
 
         {editing ? (
@@ -1620,8 +1642,7 @@ function DetailModal({
               </div>
             )}
             {displayedBarcodeImageDataUrl && (
-              <div style={{ marginBottom: 8 }}>
-                <div style={{ ...fieldLabel, marginBottom: 5 }}>バーコード</div>
+              <div data-detail-image="barcode" style={{ marginBottom: 8 }}>
                 <img
                   src={displayedBarcodeImageDataUrl}
                   alt="バーコード"
@@ -1638,8 +1659,15 @@ function DetailModal({
               </div>
             )}
             {coupon.productImageDataUrl && (
-              <div style={{ marginBottom: 10 }}>
-                <div style={{ ...fieldLabel, marginBottom: 5 }}>商品画像</div>
+              <div
+                data-detail-image="product"
+                style={{ position: "relative", marginBottom: 10 }}
+              >
+                {displayedBarcodeImageDataUrl && (
+                  <span data-detail-image-overlay-label style={detailImageOverlayLabelStyle}>
+                    商品画像
+                  </span>
+                )}
                 <img
                   src={coupon.productImageDataUrl}
                   alt={coupon.productName || "商品画像"}
@@ -1656,10 +1684,15 @@ function DetailModal({
               </div>
             )}
             {displayedCouponImageDataUrl && (
-              <div style={{ marginBottom: 10 }}>
-                <div style={{ ...fieldLabel, marginBottom: 5 }}>
-                  {showingCroppedCouponPreview ? "商品部分（自動切り出し）" : "クーポン画像"}
-                </div>
+              <div
+                data-detail-image="coupon"
+                style={{ position: "relative", marginBottom: 10 }}
+              >
+                {displayedBarcodeImageDataUrl && (
+                  <span data-detail-image-overlay-label style={detailImageOverlayLabelStyle}>
+                    {showingCroppedCouponPreview ? "商品部分（自動切り出し）" : "クーポン画像"}
+                  </span>
+                )}
                 <img
                   src={displayedCouponImageDataUrl}
                   alt={coupon.productName}
@@ -1980,6 +2013,39 @@ const fieldLabel = {
   fontWeight: 700,
   color: COLORS.muted,
   marginBottom: 14,
+};
+
+const detailImageLabelStyle = {
+  display: "inline-flex",
+  alignItems: "center",
+  minWidth: 0,
+  maxWidth: "42%",
+  boxSizing: "border-box",
+  padding: "3px 7px",
+  borderRadius: 999,
+  border: `1px solid ${COLORS.line}`,
+  background: "#FFF9F6",
+  color: COLORS.muted,
+  fontFamily: "'M PLUS Rounded 1c', sans-serif",
+  fontSize: 10,
+  fontWeight: 700,
+  lineHeight: 1.2,
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  flexShrink: 1,
+};
+
+const detailImageOverlayLabelStyle = {
+  ...detailImageLabelStyle,
+  position: "absolute",
+  top: 7,
+  right: 7,
+  zIndex: 1,
+  maxWidth: "calc(100% - 14px)",
+  background: "rgba(255, 249, 246, 0.94)",
+  boxShadow: "0 1px 4px rgba(91, 74, 72, 0.16)",
+  pointerEvents: "none",
 };
 
 const inputStyle = {

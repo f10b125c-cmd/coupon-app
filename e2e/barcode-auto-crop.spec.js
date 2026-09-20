@@ -71,7 +71,8 @@ test("未切り出しの画像は詳細を開いた時にバーコードと商�
   });
 
   await page.goto("/");
-  await page.getByText("クーリッシュ バニラ", { exact: true }).click();
+  // 商品名はカード本体と title 属性の両方に現れるため、カードの識別子で開く。
+  await page.locator('button[data-coupon-id="auto-crop"]').click();
 
   await expect(page.getByRole("img", { name: "バーコード", exact: true })).toBeVisible();
   await expect(page.getByRole("img", { name: "クーリッシュ バニラ", exact: true })).toBeVisible();

@@ -19,7 +19,6 @@ import {
   scanText,
   detectStoreFromBarcode,
   extractExpiryDate,
-  extractProductNameGuess,
   extractProductNameForRescan,
   extractBarcodeNumberGuess,
   normalizeStoreKey,
@@ -917,7 +916,7 @@ function DetailModal({
       );
       detectedDate = extractExpiryDate(text);
       if (detectedDate) setExpiresAt(detectedDate);
-      detectedName = extractProductNameGuess(lines);
+      detectedName = extractProductNameForRescan(lines, productName || "");
       if (detectedName && !productName) setProductName(detectedName);
 
       // ファミマの28桁のような密なバーコードは画像からだと解像度不足で読み取れないことがあるため、
@@ -2379,7 +2378,7 @@ export default function CouponApp() {
           if (!barcodeText) barcodeText = extractBarcodeNumberGuess(text);
           const detectedStore = detectStoreFromBarcode(barcodeText);
           const detectedDate = extractExpiryDate(text);
-          const detectedName = extractProductNameGuess(lines);
+          const detectedName = extractProductNameForRescan(lines, toSave.productName || "");
           const dup = barcodeText
             ? findDuplicateCoupon(coupons, barcodeText, coupon.id)
             : null;
@@ -2479,7 +2478,7 @@ export default function CouponApp() {
         if (!barcodeText) barcodeText = extractBarcodeNumberGuess(text);
         const detectedStore = detectStoreFromBarcode(barcodeText);
         const detectedDate = extractExpiryDate(text);
-        const detectedName = extractProductNameGuess(lines);
+        const detectedName = extractProductNameForRescan(lines, c.productName || "");
         const dup = barcodeText ? findDuplicateCoupon(knownCoupons, barcodeText, c.id) : null;
 
         if (detectedStore || detectedDate || detectedName) filledCount++;

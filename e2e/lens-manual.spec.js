@@ -45,7 +45,8 @@ async function prepare(
     `,
   }));
   await page.goto("/");
-  await page.getByText("ul dokcomo会", { exact: true }).click();
+  // 商品名はカード本体と title 属性の両方に現れるため、カードの識別子で開く。
+  await page.locator('button[data-coupon-id="lens-manual"]').click();
 }
 
 test("分離した商品画像を共有し、確認した商品名だけを登録する", async ({ page }) => {

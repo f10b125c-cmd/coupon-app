@@ -103,9 +103,58 @@ export function calculateBarcodeCropRect(imageWidth, imageHeight, resultPoints) 
   return { sourceX, sourceY, sourceWidth, sourceHeight };
 }
 
-async function cropBarcodeFromResult(sourceDataUrl, result) {
+// QRコードはZXingが返す3つのファインダーパターン中心点を基準に、
+// コード本体と周囲の白いクワイエットゾーンが欠けない正方形で切り出す。
+// 横長バーコード用の高さ計算を流用すると上下が半分ほど切れるため分離する。
+export function calculateQrCropRect(imageWidth, imageHeight, resultPoints) {
+  const points = resultPoints || [];
+  const xs = points
+    .map((point) => (typeof point?.getX === "function" ? point.getX() : point?.x))
+    .filter(Number.isFinite);
+  const ys = points
+    .map((point) => (typeof point?.getY === "function" ? point.getY() : point?.y))
+    .filter(Number.isFinite);
+  if (xs.length < 3 || ys.length < 3) return null;
+
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const detectedSpan = Math.max(maxX - minX, maxY - minY);
+  if (detectedSpan < 16) return null;
+
+  // ZXingの点はQR外周ではなく、角にある検出模様の中心を示す。
+  // 約1.55倍まで広げると外周と白い余白を安全に含められる。
+  const sourceSize = Math.min(
+    imageWidth,
+    imageHeight,
+    Math.max(72, Math.ceil(detectedSpan * 1.55))
+  );
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+  const sourceX = Math.max(
+    0,
+    Math.min(imageWidth - sourceSize, Math.round(centerX - sourceSize / 2))
+  );
+  const sourceY = Math.max(
+    0,
+    Math.min(imageHeight - sourceSize, Math.round(centerY - sourceSize / 2))
+  );
+
+  return {
+    sourceX,
+    sourceY,
+    sourceWidth: sourceSize,
+    sourceHeight: sourceSize,
+  };
+}
+
+async function cropBarcodeFromResult(sourceDataUrl, result, codeType = "barcode") {
   const img = await loadImage(sourceDataUrl);
-  const crop = calculateBarcodeCropRect(img.width, img.height, result?.getResultPoints?.() || []);
+  const points = result?.getResultPoints?.() || [];
+  const crop = codeType === "qr"
+    ? calculateQrCropRect(img.width, img.height, points)
+    : calculateBarcodeCropRect(img.width, img.height, points);
   return canvasCropDataUrl(img, crop);
 }
 
@@ -336,7 +385,7 @@ async function cropCouponRegionsByVisualDetection(sourceDataUrl) {
 
 export async function scanBarcodeWithCrop(imageDataUrl) {
   const { BrowserMultiFormatReader } = await import("@zxing/browser");
-  const { DecodeHintType } = await import("@zxing/library");
+  const { BarcodeFormat, DecodeHintType } = await import("@zxing/library");
   const hints = new Map();
   hints.set(DecodeHintType.TRY_HARDER, true);
   const reader = new BrowserMultiFormatReader(hints);
@@ -371,17 +420,20 @@ export async function scanBarcodeWithCrop(imageDataUrl) {
     try {
       const result = await withTimeout(reader.decodeFromImageUrl(src), 15000, "バーコード解析");
       if (result) {
+        const codeType = result.getBarcodeFormat?.() === BarcodeFormat.QR_CODE ? "qr" : "barcode";
         let barcodeImageDataUrl = null;
         const visualCrops = await visualCropsPromise;
         try {
-          barcodeImageDataUrl = await cropBarcodeFromResult(src, result);
+          barcodeImageDataUrl = await cropBarcodeFromResult(src, result, codeType);
         } catch (e) {
-          // 切り出しだけ失敗しても、バーコード番号の読み取り結果は返す。
+          // 切り出しだけ失敗しても、コード内容の読み取り結果は返す。
         }
-        if (!barcodeImageDataUrl) {
+        // QRコードを横長バーコードの予備検出で再切り出すと再び欠けるため、
+        // 線群フォールバックは一次元バーコードだけに使用する。
+        if (!barcodeImageDataUrl && codeType === "barcode") {
           barcodeImageDataUrl = visualCrops.barcodeImageDataUrl;
         }
-        if (!barcodeImageDataUrl && src !== baseDataUrl) {
+        if (!barcodeImageDataUrl && codeType === "barcode" && src !== baseDataUrl) {
           try {
             barcodeImageDataUrl = (
               await cropCouponRegionsByVisualDetection(src)
@@ -392,6 +444,7 @@ export async function scanBarcodeWithCrop(imageDataUrl) {
         }
         return {
           text: result.getText(),
+          codeType,
           barcodeImageDataUrl,
           couponPreviewImageDataUrl: visualCrops.couponPreviewImageDataUrl,
         };
@@ -401,7 +454,11 @@ export async function scanBarcodeWithCrop(imageDataUrl) {
     }
   }
   const visualCrops = await visualCropsPromise;
-  return { text: null, ...visualCrops };
+  return {
+    text: null,
+    codeType: visualCrops.barcodeImageDataUrl ? "barcode" : null,
+    ...visualCrops,
+  };
 }
 
 export async function scanBarcode(imageDataUrl) {

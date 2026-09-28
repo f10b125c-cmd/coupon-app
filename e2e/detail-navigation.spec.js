@@ -200,6 +200,9 @@ test("使用済みボタンは詳細を閉じず次のクーポンへ進む", as
   await expect
     .poll(() => page.evaluate(() => window.__detailPageTransitions.slice(0, 3)))
     .toEqual(["idle", "leave-used", "enter-used"]);
+  // 次の操作は240msの入場アニメーションが終わってから行う。
+  // 描画負荷が高い端末でも、移動中ガードに弾かれるタイミングで連打しない。
+  await expect(page.locator(".sheet")).toHaveAttribute("data-page-transition", "idle");
 
   await page.getByRole("button", { name: "使用済みにする", exact: true }).click();
   await expect(page.getByRole("heading", { name: "チョコモナカジャンボ" })).toBeVisible();

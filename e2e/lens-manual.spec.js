@@ -7,6 +7,8 @@ async function prepare(
   page,
   { productImageDataUrl = PRODUCT_IMAGE, couponPreviewImageDataUrl = null } = {}
 ) {
+  // 実行日が固定期限を越えても一覧から消えないよう、券面作成時点へ固定する。
+  await page.clock.setFixedTime(new Date("2026-09-05T00:00:00Z"));
   await page.addInitScript(({ productImageDataUrl, couponPreviewImageDataUrl, fullImage }) => {
     window.__lensShares = [];
     window.__lensWrites = [];

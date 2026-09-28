@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   calculateBarcodeCropRect,
   calculateCouponPreviewCropRect,
+  calculateQrCropRect,
   detectLinearBarcodeCropRect,
   detectStoreFromBarcode,
   extractBarcodeNumberGuess,
@@ -39,6 +40,29 @@ test("検出したバーコード座標へ余白を足して画像内に収ま�
   assert.equal(edgeCrop.sourceY, 0);
   assert.ok(edgeCrop.sourceWidth <= 400);
   assert.ok(edgeCrop.sourceHeight <= 300);
+});
+
+test("QRコードは白い余白を含む正方形で切り出す", () => {
+  assert.deepEqual(
+    calculateQrCropRect(600, 1000, [
+      { x: 180, y: 300 },
+      { x: 180, y: 500 },
+      { x: 380, y: 300 },
+    ]),
+    { sourceX: 125, sourceY: 245, sourceWidth: 310, sourceHeight: 310 }
+  );
+
+  const edgeCrop = calculateQrCropRect(300, 300, [
+    { x: 20, y: 20 },
+    { x: 20, y: 160 },
+    { x: 160, y: 20 },
+  ]);
+  assert.deepEqual(edgeCrop, {
+    sourceX: 0,
+    sourceY: 0,
+    sourceWidth: 217,
+    sourceHeight: 217,
+  });
 });
 
 test("番号を復号できなくても縦線群からバーコード領域を見つける", () => {

@@ -1,10 +1,26 @@
 import { test, expect } from "@playwright/test";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 
 const FULL_IMAGE = "data:image/jpeg;base64,AA==";
 const CROPPED_BARCODE = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aU1sAAAAASUVORK5CYII=";
 const CROPPED_PRODUCT = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/58BAQEDAQAIicLsAAAAAElFTkSuQmCC";
+const require = createRequire(import.meta.url);
+const QRCodeWriter = require("../node_modules/@zxing/library/cjs/core/qrcode/QRCodeWriter.js").default;
+const BarcodeFormat = require("../node_modules/@zxing/library/cjs/core/BarcodeFormat.js").default;
+
+function makeQrSvgDataUrl(text, size = 360) {
+  const matrix = new QRCodeWriter().encode(text, BarcodeFormat.QR_CODE, size, size, new Map());
+  const cells = [];
+  for (let y = 0; y < matrix.getHeight(); y++) {
+    for (let x = 0; x < matrix.getWidth(); x++) {
+      if (matrix.get(x, y)) cells.push(`<rect x="${x}" y="${y}" width="1" height="1"/>`);
+    }
+  }
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${matrix.getWidth()} ${matrix.getHeight()}" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="white"/><g fill="black">${cells.join("")}</g></svg>`;
+  return `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
+}
 
 test("未切り出しの画像は詳細を開いた時にバーコードと商品部分を表示・保存する", async ({ page }) => {
   await page.addInitScript(({ fullImage, croppedBarcode, croppedProduct }) => {
@@ -19,7 +35,7 @@ test("未切り出しの画像は詳細を開いた時にバーコードと商�
       productImageDataUrl: null,
       barcodeImageDataUrl: null,
       couponPreviewImageDataUrl: null,
-      expiresAt: "2026-09-22",
+      expiresAt: "2099-09-22",
       store: "lawson",
       barcode: "82220052425158444",
       memo: "変更しないメモ",
@@ -62,6 +78,7 @@ test("未切り出しの画像は詳細を開いた時にバーコードと商�
         window.__autoCropCalls += 1;
         return {
           text: window.__autoCropCoupon.barcode,
+          codeType: "barcode",
           barcodeImageDataUrl: window.__autoCropResult,
           couponPreviewImageDataUrl: window.__autoProductCropResult,
         };
@@ -85,11 +102,40 @@ test("未切り出しの画像は詳細を開いた時にバーコードと商�
   }));
   expect(result.calls).toBe(1);
   expect(result.saved.barcodeImageDataUrl).toBe(CROPPED_BARCODE);
+  expect(result.saved.codeType).toBe("barcode");
   expect(result.saved.couponPreviewImageDataUrl).toBe(CROPPED_PRODUCT);
   expect(result.saved.imageDataUrl).toBe(FULL_IMAGE);
   expect(result.saved.productName).toBe("クーリッシュ バニラ");
-  expect(result.saved.expiresAt).toBe("2026-09-22");
+  expect(result.saved.expiresAt).toBe("2099-09-22");
   expect(result.saved.memo).toBe("変更しないメモ");
+});
+
+test("QRコードを判別し、上下を切らず正方形で切り出す", async ({ page }) => {
+  const qrText = "https://example.sushiro.jp/coupon/1000";
+  const qrDataUrl = makeQrSvgDataUrl(qrText);
+
+  await page.route(/https:\/\/[^/]*(?:googleapis\.com|firebaseio\.com)\//, (route) => {
+    if (route.request().url().startsWith("https://fonts.googleapis.com/")) return route.continue();
+    return route.abort();
+  });
+  await page.goto("/");
+
+  const result = await page.evaluate(async ({ imageDataUrl }) => {
+    const { scanBarcodeWithCrop } = await import("/src/scan.js");
+    const scanned = await scanBarcodeWithCrop(imageDataUrl);
+    const dimensions = await new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
+      image.onerror = reject;
+      image.src = scanned.barcodeImageDataUrl;
+    });
+    return { ...scanned, dimensions };
+  }, { imageDataUrl: qrDataUrl });
+
+  expect(result.text).toBe(qrText);
+  expect(result.codeType).toBe("qr");
+  expect(result.barcodeImageDataUrl).toMatch(/^data:image\//);
+  expect(result.dimensions.width).toBe(result.dimensions.height);
 });
 
 test("実画像でもバーコードの反対側を商品プレビューにできる", async ({ page }, testInfo) => {

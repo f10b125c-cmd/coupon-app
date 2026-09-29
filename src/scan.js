@@ -72,6 +72,48 @@ function makeBandCrops(img) {
   return crops;
 }
 
+// 縦長スクリーンショット内のQRコードは、画面全体を縮小すると1セルが小さくなり、
+// ZXingが復号できないことがある。一方、横長バーコード用の帯では正方形のQRが
+// 上下で欠けるため、長辺方向へ重なる正方形をずらして候補を作る。
+export function calculateSlidingSquareCropRects(imageWidth, imageHeight) {
+  if (!(imageWidth > 0) || !(imageHeight > 0)) return [];
+  if (imageWidth === imageHeight) {
+    return [{ sourceX: 0, sourceY: 0, sourceWidth: imageWidth, sourceHeight: imageHeight }];
+  }
+  const size = Math.min(imageWidth, imageHeight);
+  const travel = Math.max(imageWidth, imageHeight) - size;
+  const windowCount = Math.min(5, Math.max(2, Math.ceil(travel / (size * 0.45)) + 1));
+  return Array.from({ length: windowCount }, (_, index) => {
+    const offset = Math.round((travel * index) / (windowCount - 1));
+    return imageHeight > imageWidth
+      ? { sourceX: 0, sourceY: offset, sourceWidth: size, sourceHeight: size }
+      : { sourceX: offset, sourceY: 0, sourceWidth: size, sourceHeight: size };
+  });
+}
+
+function makeSquareCrops(img) {
+  return calculateSlidingSquareCropRects(img.width, img.height).map((crop) => {
+    const scale = Math.min(2, 1600 / crop.sourceWidth);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(crop.sourceWidth * scale));
+    canvas.height = Math.max(1, Math.round(crop.sourceHeight * scale));
+    const ctx = canvas.getContext("2d");
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(
+      img,
+      crop.sourceX,
+      crop.sourceY,
+      crop.sourceWidth,
+      crop.sourceHeight,
+      0,
+      0,
+      canvas.width,
+      canvas.height
+    );
+    return canvas.toDataURL("image/png");
+  });
+}
+
 // ZXingが返すバーコード両端の座標を使い、レジ提示用にバーコード周辺だけを切り出す。
 // 認識に使った候補画像から直接切り出すため、全体画像・横帯候補のどちらで
 // 読めた場合も同じ処理で対応できる。
@@ -156,6 +198,32 @@ async function cropBarcodeFromResult(sourceDataUrl, result, codeType = "barcode"
     ? calculateQrCropRect(img.width, img.height, points)
     : calculateBarcodeCropRect(img.width, img.height, points);
   return canvasCropDataUrl(img, crop);
+}
+
+// QRの3つの位置検出パターンは見えていても、圧縮や画面キャプチャの状態により
+// 内容の誤り訂正まで成功しない券がある。その場合もQRであることと表示範囲は
+// 確定できるため、ZXingの検出器だけを使って正方形画像を作る。
+async function cropQrFromFinderPatterns(sourceDataUrl, hints) {
+  const {
+    BinaryBitmap,
+    HybridBinarizer,
+    HTMLCanvasElementLuminanceSource,
+  } = await import("@zxing/library");
+  const { default: QrDetector } = await import(
+    "@zxing/library/esm/core/qrcode/detector/Detector.js"
+  );
+  const img = await loadImage(sourceDataUrl);
+  const canvas = document.createElement("canvas");
+  canvas.width = img.width;
+  canvas.height = img.height;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(img, 0, 0);
+  const luminance = new HTMLCanvasElementLuminanceSource(canvas);
+  const bitmap = new BinaryBitmap(new HybridBinarizer(luminance));
+  const detected = new QrDetector(bitmap.getBlackMatrix()).detect(hints);
+  const crop = calculateQrCropRect(img.width, img.height, detected.getPoints());
+  const barcodeImageDataUrl = canvasCropDataUrl(img, crop);
+  return barcodeImageDataUrl ? { barcodeImageDataUrl } : null;
 }
 
 // バーコード番号をOCRでは読めてもZXingが線の位置を返せない画像向け。
@@ -403,6 +471,7 @@ export async function scanBarcodeWithCrop(imageDataUrl) {
   const candidates = [baseDataUrl];
   if (boundedImg) {
     try {
+      candidates.push(...makeSquareCrops(boundedImg));
       candidates.push(...makeBandCrops(boundedImg));
     } catch (e) {
       // クロップに失敗しても全体画像だけでトライする
@@ -452,6 +521,22 @@ export async function scanBarcodeWithCrop(imageDataUrl) {
     } catch (e) {
       // この候補では見つからなかった。次の候補へ。
     }
+  }
+
+  // 復号に失敗しても3つの位置検出パターンが揃っていればQRとして扱う。
+  // 内容は推測せずnullのままにし、誤った重複判定や店舗判定には使用しない。
+  try {
+    const detectedQr = await cropQrFromFinderPatterns(baseDataUrl, hints);
+    if (detectedQr) {
+      return {
+        text: null,
+        codeType: "qr",
+        barcodeImageDataUrl: detectedQr.barcodeImageDataUrl,
+        couponPreviewImageDataUrl: null,
+      };
+    }
+  } catch (e) {
+    // QRの位置も検出できなければ従来の一次元バーコード検出へ進む。
   }
   const visualCrops = await visualCropsPromise;
   return {
@@ -1182,7 +1267,9 @@ function isScreenshotChromeText(value) {
 
 function extractProductNameReading(lines) {
   const eligible = (lines || []).filter(line => !isScreenshotChromeText(line.text));
-  const structured = extractJapaneseAleExchangeProduct(eligible) || extractMultilineExchangeProduct(eligible);
+  const structured = extractQrGiftProduct(eligible) ||
+    extractJapaneseAleExchangeProduct(eligible) ||
+    extractMultilineExchangeProduct(eligible);
   const guessed = structured || guessProductName(eligible, true) || guessProductName(eligible, false);
   const empty = { name: "", confidence: "none" };
   if (!guessed || isScreenshotChromeText(guessed)) return empty;
@@ -1198,6 +1285,25 @@ function extractProductNameReading(lines) {
   const strong = structured || name !== guessed || anchored ||
     (hasEnoughNameChars(name, true) && /\d+\s*(?:ml|ｍｌ|g|個|本|枚|袋|杯)/i.test(name));
   return { name, confidence: strong ? "high" : "low" };
+}
+
+// 電子ギフトの引換画面は、商品ロゴの直下に
+// 「スシローのギフト 1,000円」のような確定名称が表示される。
+// ロゴだけの「スシロー」もOCRされるため、従来の「画像直下の最初の行」を使うと
+// そちらを先に採用して名称が途中で切れる。金額まで読めた確定名称だけを独立した
+// パターンとして優先し、他のクーポンの既存抽出順には影響させない。
+function extractQrGiftProduct(lines) {
+  for (const { text } of lines || []) {
+    const compact = normalizeDigits(tidySpacing(text || ""))
+      .replace(/\s+/g, "")
+      .replace(/[，,.．]/g, "");
+    const match = compact.match(/^スシローのギフト(\d{3,6})円$/);
+    if (!match) continue;
+    const amount = Number(match[1]);
+    if (!Number.isSafeInteger(amount) || amount <= 0) continue;
+    return `スシローのギフト ${amount.toLocaleString("ja-JP")}円`;
+  }
+  return "";
 }
 
 // 「350ml &」のように容器名が崩れていても、容量だけを手がかりに再読範囲を

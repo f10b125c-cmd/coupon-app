@@ -5,6 +5,7 @@ import {
   calculateBarcodeCropRect,
   calculateCouponPreviewCropRect,
   calculateQrCropRect,
+  calculateSlidingSquareCropRects,
   detectLinearBarcodeCropRect,
   detectStoreFromBarcode,
   extractBarcodeNumberGuess,
@@ -63,6 +64,18 @@ test("QRコードは白い余白を含む正方形で切り出す", () => {
     sourceWidth: 217,
     sourceHeight: 217,
   });
+});
+
+test("縦長画像をQRが欠けない重なった正方形候補に分ける", () => {
+  const crops = calculateSlidingSquareCropRects(738, 1600);
+  assert.deepEqual(crops, [
+    { sourceX: 0, sourceY: 0, sourceWidth: 738, sourceHeight: 738 },
+    { sourceX: 0, sourceY: 287, sourceWidth: 738, sourceHeight: 738 },
+    { sourceX: 0, sourceY: 575, sourceWidth: 738, sourceHeight: 738 },
+    { sourceX: 0, sourceY: 862, sourceWidth: 738, sourceHeight: 738 },
+  ]);
+  // 実券のQR範囲（およそY=720〜1270）が3番目の候補へ完全に入る。
+  assert.ok(crops.some((crop) => crop.sourceY <= 720 && crop.sourceY + crop.sourceHeight >= 1270));
 });
 
 test("番号を復号できなくても縦線群からバーコード領域を見つける", () => {
@@ -180,6 +193,21 @@ test("既存の鉤括弧パターンも従来どおり読む", () => {
   assert.equal(
     extractProductNameGuess(lines("「ガリガリ君ソーダ」無料引換券")),
     "ガリガリ君ソーダ"
+  );
+});
+
+test("QRギフトはロゴの短い候補より金額付きの商品名を優先する", () => {
+  const actual = lines(
+    "4 Chrome 13:28 66%",
+    "引き 換え 画面",
+    "| スシ ロー",
+    "スシ ロー の ギフ ト 1.000 円",
+    "二 次 元 コー ド を 使用 済み に する"
+  );
+  assert.equal(extractProductNameGuess(actual), "スシローのギフト 1,000円");
+  assert.equal(
+    extractProductNameForRescan(actual, "| スシロー"),
+    "スシローのギフト 1,000円"
   );
 });
 

@@ -10,7 +10,7 @@ const require = createRequire(import.meta.url);
 const QRCodeWriter = require("../node_modules/@zxing/library/cjs/core/qrcode/QRCodeWriter.js").default;
 const BarcodeFormat = require("../node_modules/@zxing/library/cjs/core/BarcodeFormat.js").default;
 
-function makeQrSvgDataUrl(text, size = 360) {
+function makeQrSvgDataUrl(text, size = 360, corruptPayload = false) {
   const matrix = new QRCodeWriter().encode(text, BarcodeFormat.QR_CODE, size, size, new Map());
   const cells = [];
   for (let y = 0; y < matrix.getHeight(); y++) {
@@ -18,7 +18,10 @@ function makeQrSvgDataUrl(text, size = 360) {
       if (matrix.get(x, y)) cells.push(`<rect x="${x}" y="${y}" width="1" height="1"/>`);
     }
   }
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${matrix.getWidth()} ${matrix.getHeight()}" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="white"/><g fill="black">${cells.join("")}</g></svg>`;
+  const corruption = corruptPayload
+    ? `<rect x="120" y="120" width="200" height="200" fill="white"/>`
+    : "";
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${matrix.getWidth()} ${matrix.getHeight()}" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="white"/><g fill="black">${cells.join("")}</g>${corruption}</svg>`;
   return `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
 }
 
@@ -133,6 +136,37 @@ test("QRコードを判別し、上下を切らず正方形で切り出す", asy
   }, { imageDataUrl: qrDataUrl });
 
   expect(result.text).toBe(qrText);
+  expect(result.codeType).toBe("qr");
+  expect(result.barcodeImageDataUrl).toMatch(/^data:image\//);
+  expect(result.dimensions.width).toBe(result.dimensions.height);
+});
+
+test("QR内容を復号できなくても位置検出から正方形で表示する", async ({ page }) => {
+  const qrDataUrl = makeQrSvgDataUrl(
+    "https://example.sushiro.jp/coupon/detector-only",
+    360,
+    true
+  );
+
+  await page.route(/https:\/\/[^/]*(?:googleapis\.com|firebaseio\.com)\//, (route) => {
+    if (route.request().url().startsWith("https://fonts.googleapis.com/")) return route.continue();
+    return route.abort();
+  });
+  await page.goto("/");
+
+  const result = await page.evaluate(async (imageDataUrl) => {
+    const { scanBarcodeWithCrop } = await import("/src/scan.js");
+    const scanned = await scanBarcodeWithCrop(imageDataUrl);
+    const dimensions = await new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
+      image.onerror = reject;
+      image.src = scanned.barcodeImageDataUrl;
+    });
+    return { ...scanned, dimensions };
+  }, qrDataUrl);
+
+  expect(result.text).toBeNull();
   expect(result.codeType).toBe("qr");
   expect(result.barcodeImageDataUrl).toMatch(/^data:image\//);
   expect(result.dimensions.width).toBe(result.dimensions.height);

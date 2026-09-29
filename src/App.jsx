@@ -186,6 +186,15 @@ function normalizeScannedCode(raw, codeType) {
   return normalizeBarcode(value) || value;
 }
 
+// 旧版はQR内容を数字だけへ変換し、期限や金額の数字をバーコードとして
+// 保存することがあった。QR位置だけ検出できて内容を復号できない場合は、
+// 以前からQRとして保存済みの値だけを維持し、旧一次元コード値は引き継がない。
+function resolveQrCode(raw, existingRaw = "", existingCodeType = "") {
+  const decoded = normalizeScannedCode(raw, "qr");
+  if (decoded) return decoded;
+  return normalizeCodeType(existingCodeType) === "qr" ? String(existingRaw || "") : "";
+}
+
 // 完全一致がない場合に比較する末尾の桁数。バーコード画像が読み取れずOCRで一部の桁しか
 // 拾えなかった場合などのフォールバックで、家族内の少数のクーポンなら末尾一致でも衝突しにくい。
 const BARCODE_TAIL_MATCH_LEN = 5;
@@ -961,7 +970,7 @@ function DetailModal({
       // ファミマの28桁のような密なバーコードは画像からだと解像度不足で読み取れないことがあるため、
       // 失敗した場合は印字されている数字をOCRで拾って代わりに使う
       let barcodeSource = "image";
-      if (!barcodeText) {
+      if (!barcodeText && detectedCodeType !== "qr") {
         const guess = extractBarcodeNumberGuess(text);
         if (guess) {
           barcodeText = guess;
@@ -973,7 +982,11 @@ function DetailModal({
 
       detectedStore = detectedCodeType === "qr" ? "" : detectStoreFromBarcode(barcodeText);
       if (detectedStore) setStore(detectedStore);
-      if (barcodeText) setBarcode(normalizeScannedCode(barcodeText, detectedCodeType));
+      if (detectedCodeType === "qr") {
+        setBarcode(resolveQrCode(barcodeText, coupon.barcode, coupon.codeType));
+      } else if (barcodeText) {
+        setBarcode(normalizeScannedCode(barcodeText, detectedCodeType));
+      }
 
       const dup = barcodeText
         ? findDuplicateCoupon(coupons, barcodeText, coupon.id, detectedCodeType)
@@ -1075,11 +1088,16 @@ function DetailModal({
         // ZXingが読んだ内容へ戻す。店舗・商品名・期限は変更しない。
         if (
           detectedCodeType === "qr" &&
-          detectedCodeText &&
-          detectedCodeText !== latestCoupon.barcode
+          resolveQrCode(detectedCodeText, latestCoupon.barcode, latestCoupon.codeType) !==
+            latestCoupon.barcode
         ) {
-          setBarcode(detectedCodeText);
-          updates.barcode = detectedCodeText;
+          const nextCode = resolveQrCode(
+            detectedCodeText,
+            latestCoupon.barcode,
+            latestCoupon.codeType
+          );
+          setBarcode(nextCode);
+          updates.barcode = nextCode;
         }
         if (!Object.keys(updates).length) {
           return;
@@ -1195,7 +1213,7 @@ function DetailModal({
       const { text, lines } = await scanText(coupon.imageDataUrl, (pct) =>
         setScanMessage(`文字を認識中…${pct}%`)
       );
-      if (!barcodeText) {
+      if (!barcodeText && detectedCodeType !== "qr") {
         barcodeText = extractBarcodeNumberGuess(text);
         if (barcodeText) detectedCodeType = "barcode";
       }
@@ -1209,8 +1227,8 @@ function DetailModal({
         store: normalizeStoreKey(coupon.store) || detectedStore || "",
         expiresAt: detectedDate || coupon.expiresAt || "",
         barcode:
-          (detectedCodeType === "qr" && barcodeText
-            ? normalizeScannedCode(barcodeText, detectedCodeType)
+          (detectedCodeType === "qr"
+            ? resolveQrCode(barcodeText, coupon.barcode, coupon.codeType)
             : coupon.barcode || normalizeScannedCode(barcodeText, detectedCodeType)) || "",
         codeType: detectedCodeType || normalizeCodeType(coupon.codeType) || null,
         barcodeImageDataUrl:
@@ -2455,7 +2473,7 @@ export default function CouponApp() {
           const { text, lines } = await scanText(imageDataUrl);
           // 画像からのバーコード読み取りが失敗した場合、印字されている数字をOCRで拾って代用する
           // （ファミマの28桁のような密なバーコードは画像解像度不足で失敗しやすいため）
-          if (!barcodeText) {
+          if (!barcodeText && detectedCodeType !== "qr") {
             barcodeText = extractBarcodeNumberGuess(text);
             if (barcodeText) detectedCodeType = "barcode";
           }
@@ -2471,7 +2489,9 @@ export default function CouponApp() {
           const canAutoRegister = !!detectedStore && !dup;
           toSave = {
             ...toSave,
-            barcode: normalizeScannedCode(barcodeText, detectedCodeType),
+            barcode: detectedCodeType === "qr"
+              ? resolveQrCode(barcodeText, toSave.barcode, toSave.codeType)
+              : normalizeScannedCode(barcodeText, detectedCodeType),
             codeType: detectedCodeType || null,
             barcodeImageDataUrl: barcodeResult.barcodeImageDataUrl || null,
             couponPreviewImageDataUrl:
@@ -2560,7 +2580,7 @@ export default function CouponApp() {
         let barcodeText = barcodeResult.text;
         let detectedCodeType = normalizeCodeType(barcodeResult.codeType);
         const { text, lines } = await scanText(c.imageDataUrl);
-        if (!barcodeText) {
+        if (!barcodeText && detectedCodeType !== "qr") {
           barcodeText = extractBarcodeNumberGuess(text);
           if (barcodeText) detectedCodeType = "barcode";
         }
@@ -2586,7 +2606,9 @@ export default function CouponApp() {
           expiresAt: c.expiresAt || detectedDate || "",
           productName: c.productName || detectedName || "",
           barcode:
-            (barcodeText && normalizeScannedCode(barcodeText, detectedCodeType)) || c.barcode || "",
+            (detectedCodeType === "qr"
+              ? resolveQrCode(barcodeText, c.barcode, c.codeType)
+              : (barcodeText && normalizeScannedCode(barcodeText, detectedCodeType)) || c.barcode) || "",
           codeType: detectedCodeType || normalizeCodeType(c.codeType) || null,
           barcodeImageDataUrl:
             (!c.productImageDataUrl && barcodeResult.barcodeImageDataUrl) ||
@@ -2640,7 +2662,7 @@ export default function CouponApp() {
         let barcodeText = barcodeResult.text;
         let detectedCodeType = normalizeCodeType(barcodeResult.codeType);
         const { text, lines } = await scanText(c.imageDataUrl);
-        if (!barcodeText) {
+        if (!barcodeText && detectedCodeType !== "qr") {
           barcodeText = extractBarcodeNumberGuess(text);
           if (barcodeText) detectedCodeType = "barcode";
         }
@@ -2657,8 +2679,8 @@ export default function CouponApp() {
           store: normalizeStoreKey(c.store) || detectedStore || "",
           expiresAt: detectedDate || c.expiresAt || "",
           barcode:
-            (detectedCodeType === "qr" && barcodeText
-              ? normalizeScannedCode(barcodeText, detectedCodeType)
+            (detectedCodeType === "qr"
+              ? resolveQrCode(barcodeText, c.barcode, c.codeType)
               : c.barcode || normalizeScannedCode(barcodeText, detectedCodeType)) || "",
           codeType: detectedCodeType || normalizeCodeType(c.codeType) || null,
           barcodeImageDataUrl:

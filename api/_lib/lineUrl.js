@@ -1,5 +1,6 @@
 import dns from "node:dns/promises";
 import net from "node:net";
+import sharp from "sharp";
 
 const MAX_HTML_BYTES = 2 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
@@ -234,6 +235,34 @@ export function extractFamimaCouponDetails(html) {
   return { productName, expiresAt };
 }
 
+export function extractValueGiftDetails(html) {
+  const metadata = extractPageMetadata(html, "https://valuegift.jp/");
+  const titleTag = String(html || "").match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "";
+  const giftName = decodeHtml(titleTag).split(/\s+\|\s+/)[0]?.trim() || "";
+  const company = metadata.title.trim();
+  const productName = [company, giftName].filter(Boolean).join(" ").slice(0, 180);
+  const visibleText = decodeHtml(String(html || ""))
+    .replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ");
+  const date = visibleText.match(/(20\d{2})年\s*(\d{1,2})月\s*(\d{1,2})日(?:\s*\d{1,2}時\s*\d{1,2}分)?\s*まで有効/);
+  const expiresAt = date
+    ? `${date[1]}-${date[2].padStart(2, "0")}-${date[3].padStart(2, "0")}`
+    : "";
+  return { productName, expiresAt };
+}
+
+export async function isSupportedPreviewImage(buffer, contentType) {
+  if (contentType.startsWith("image/")) return true;
+  if (!contentType.startsWith("application/octet-stream")) return false;
+  try {
+    const { format } = await sharp(buffer).metadata();
+    return ["jpeg", "png", "webp", "gif", "avif"].includes(format);
+  } catch {
+    return false;
+  }
+}
+
 export async function fetchFamimaCouponPreview(value) {
   if (!isFamimaCouponUrl(value)) throw new Error("ファミマのクーポンURLではありません");
   const input = new URL(value);
@@ -286,21 +315,37 @@ export async function fetchFamimaCouponPreview(value) {
 
 export async function fetchUrlPreview(value) {
   const page = await fetchPublic(value, MAX_HTML_BYTES, "text/html,application/xhtml+xml,image/*;q=0.8,*/*;q=0.1");
-  if (page.contentType.startsWith("image/")) {
+  if (await isSupportedPreviewImage(page.buffer, page.contentType)) {
     return { title: "", image: page.buffer, finalUrl: page.finalUrl };
   }
   if (!page.contentType.includes("text/html") && !page.contentType.includes("application/xhtml+xml")) {
     return { title: "", image: null, finalUrl: page.finalUrl };
   }
-  const metadata = extractPageMetadata(page.buffer.toString("utf8"), page.finalUrl);
-  if (!metadata.imageUrl) return { title: metadata.title, image: null, finalUrl: page.finalUrl };
+  const html = page.buffer.toString("utf8");
+  const metadata = extractPageMetadata(html, page.finalUrl);
+  const valueGiftDetails = new URL(page.finalUrl).hostname === "valuegift.jp"
+    ? extractValueGiftDetails(html)
+    : null;
+  const fallback = valueGiftDetails
+    ? {
+        title: valueGiftDetails.productName || metadata.title,
+        productName: valueGiftDetails.productName,
+        expiresAt: valueGiftDetails.expiresAt,
+        store: "other",
+        image: null,
+        finalUrl: page.finalUrl,
+        autoScanned: true,
+      }
+    : { title: metadata.title, image: null, finalUrl: page.finalUrl };
+  if (!metadata.imageUrl) return fallback;
   try {
     const image = await fetchPublic(metadata.imageUrl, MAX_IMAGE_BYTES, "image/*");
-    if (!image.contentType.startsWith("image/")) {
-      return { title: metadata.title, image: null, finalUrl: page.finalUrl };
+    if (!(await isSupportedPreviewImage(image.buffer, image.contentType))) {
+      return fallback;
     }
+    if (valueGiftDetails) return { ...fallback, productImage: image.buffer };
     return { title: metadata.title, image: image.buffer, finalUrl: page.finalUrl };
   } catch {
-    return { title: metadata.title, image: null, finalUrl: page.finalUrl };
+    return fallback;
   }
 }

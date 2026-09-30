@@ -30,6 +30,8 @@ LINEグループの通常URLは、タイトルとOG画像の取得を試して�
 
 ファミマの `ncpfa.famima.com/prd/ebcweb` は例外で、OG画像ではなく追加画面から商品名・期限・POSバーコード画像を取得する。`fetchFamimaCouponPreview()` の遷移先制限（公式の`/prd/`・`/contents/`だけ）を緩めないこと。
 
+2026-09-30追加: `valuegift.jp` の電子優待券はOG画像がJPEGでも `application/octet-stream` で配信される。`fetchUrlPreview()` はこの形式に限りSharpで画像の実体を検証し、券面画像を `productImage`、ページtitleから券名、本文から有効期限として返す。Webhookは `productImageDataUrl` に保存するため、URLのままでも詳細に券面画像が出る。未整理でもこの画像が揃ったvaluegift券は閲覧表示で開き、「券面を開いて利用する」で元ページを別タブへ開く。元サイトの `X-Frame-Options: SAMEORIGIN` によりiframe埋め込みは不可。残高と利用コードは変化するので静的保存しない。2026-09-30の既存3件（`line-634004237965066277-url-1` ～ `-3`）にも券面画像・券名・期限を反映済み。単体テストは `api/_lib/lineUrl.test.js`、スマホUIは `e2e/detail-navigation.spec.js`。
+
 ## 開発・確認・公開
 
 ```bash

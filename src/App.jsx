@@ -874,7 +874,10 @@ function DetailModal({
   position,
   pageTransition,
 }) {
-  const [editing, setEditing] = useState(!!coupon.inbox);
+  const isValueGiftCoupon = coupon.url?.startsWith("https://valuegift.jp/");
+  const [editing, setEditing] = useState(
+    !!coupon.inbox && !(isValueGiftCoupon && coupon.productImageDataUrl)
+  );
   const [productName, setProductName] = useState(coupon.productName);
   const [url, setUrl] = useState(coupon.url || "");
   const [imageDataUrl, setImageDataUrl] = useState(coupon.imageDataUrl || null);
@@ -1668,7 +1671,7 @@ function DetailModal({
                 }}
               >
                 <ScanLine size={15} />
-                URLを開いてスキャン
+                {url.trim().startsWith("https://valuegift.jp/") ? "券面を開いて利用する" : "URLを開いてスキャン"}
                 <ExternalLink size={13} />
               </a>
             )}
@@ -1802,6 +1805,26 @@ function DetailModal({
                   }}
                 />
               </div>
+            )}
+
+            {coupon.url && (
+              <a
+                href={coupon.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  ...primaryBtn(COLORS.ink),
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
+                  textDecoration: "none",
+                  marginBottom: 12,
+                }}
+              >
+                <ExternalLink size={15} />
+                {isValueGiftCoupon ? "券面を開いて利用する" : "URLを開いてスキャン"}
+              </a>
             )}
 
             <div
@@ -2040,27 +2063,6 @@ function DetailModal({
               >
                 {coupon.memo}
               </div>
-            )}
-
-            {coupon.url && (
-              <a
-                href={coupon.url}
-                target="_blank"
-                rel="noreferrer"
-                style={{
-                  ...primaryBtn(COLORS.ink),
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 8,
-                  textDecoration: "none",
-                  marginBottom: 10,
-                }}
-              >
-                <ScanLine size={15} />
-                URLを開いてスキャン
-                <ExternalLink size={13} />
-              </a>
             )}
 
             {coupon.inbox && (

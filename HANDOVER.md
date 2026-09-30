@@ -1,5 +1,13 @@
 # 引き継ぎノート
 
+## 2026-09-30 LINEのvaluegift電子優待券
+
+LINEから届いた `valuegift.jp` の3件はURLと会社名だけで保存されていた。原因は券面のOG画像がJPEGなのに配信側のContent-Typeが `application/octet-stream` で、従来の `image/*` 判定が捨てていたこと。`api/_lib/lineUrl.js` ではこのContent-Typeに限りSharpで実際の画像形式を確認して受け付ける。valuegiftページのtitleと有効期限を抽出し、券面画像を `productImageDataUrl` に保存する。残高や利用コードは変化するため保存しない。
+
+既存のLINE由来3件（`line-634004237965066277-url-1` ～ `-3`）も券面画像・券名・期限・店舗「その他」をFirestoreへ反映した。詳細は券面画像の直後に「券面を開いて利用する」を表示し、未整理のvaluegiftでも画像が揃った券は閲覧表示で開く。元サイトは `X-Frame-Options: SAMEORIGIN` のためアプリ内埋め込みはできず、利用操作は別タブの元ページで行う。
+
+`api/_lib/lineUrl.test.js` で券名・期限・画像形式を、隔離Playwrightでスマホ幅の券面画像と利用リンクを確認する。
+
 ## 2026-09-29 QRコードの判別と正方形切り出し
 
 `scanBarcodeWithCrop()` はZXingの `BarcodeFormat.QR_CODE` を見て `codeType: "qr"` を返す。QRは3つのファインダーパターン中心点から外周と白い余白を含む正方形を計算し、横長バーコード用の高さ44%クロップを使わない。表示ラベル・代替テキスト・編集項目も「QRコード」へ切り替え、QR内のURLや英数字は数字だけに変換せず保存する。既存券に `codeType` がない場合は詳細を開いた時に1回再判定し、旧版で上下が切れた画像と壊れたQR内容を差し替える。商品名・店舗・期限は変更しない。

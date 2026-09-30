@@ -30,7 +30,7 @@ const coupons = [
 test.beforeEach(async ({ page }) => {
   await page.clock.setFixedTime(new Date("2026-09-07T00:00:00Z"));
   await page.addInitScript((initialCoupons) => {
-    window.__navigationCoupons = initialCoupons;
+    window.__navigationCoupons = JSON.parse(sessionStorage.getItem("navigationCouponsOverride") || "null") || initialCoupons;
     window.__savedCoupons = [];
   }, coupons);
   await page.route(/https:\/\/[^/]*(?:googleapis\.com|firebaseio\.com)\//, (route) => {
@@ -49,6 +49,38 @@ test.beforeEach(async ({ page }) => {
     })
   );
   await page.goto("/");
+});
+
+test("LINEの電子優待券は券面画像と利用ページへのリンクを続けて表示する", async ({ page }) => {
+  const giftUrl = "https://valuegift.jp/card/example";
+  await page.evaluate(({ coupon, giftUrl }) => {
+    const valueGiftCoupons = [{
+      ...coupon,
+      id: "nav-valuegift",
+      productName: "すかいらーく 株主優待券",
+      imageDataUrl: null,
+      productImageDataUrl: coupon.imageDataUrl,
+      barcodeImageDataUrl: null,
+      couponPreviewImageDataUrl: null,
+      sourceType: "url",
+      url: giftUrl,
+      inbox: true,
+      expiresAt: "2027-09-30",
+    }];
+    sessionStorage.setItem("navigationCouponsOverride", JSON.stringify(valueGiftCoupons));
+  }, { coupon: coupons[0], giftUrl });
+  await page.reload();
+  await page.getByRole("button", { name: /未整理/ }).click();
+  await page.getByText("すかいらーく 株主優待券", { exact: true }).click();
+
+  const image = page.locator('[data-detail-image="product"] img');
+  const link = page.getByRole("link", { name: "券面を開いて利用する" });
+  const used = page.getByRole("button", { name: "使用済みにする" });
+  await expect(image).toBeVisible();
+  await expect(link).toHaveAttribute("href", giftUrl);
+  await expect(link).toHaveAttribute("target", "_blank");
+  expect((await link.boundingBox()).y).toBeGreaterThan((await image.boundingBox()).y);
+  expect((await link.boundingBox()).y).toBeLessThan((await used.boundingBox()).y);
 });
 
 test("詳細画面は件数だけを表示し、スワイプで前後移動する", async ({ page }) => {

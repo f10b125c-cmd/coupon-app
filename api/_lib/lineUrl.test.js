@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { extractFamimaCouponDetails, extractHttpUrls, extractPageMetadata, fetchUrlPreview, findFamimaProductImage } from "./lineUrl.js";
+import sharp from "sharp";
+import { extractFamimaCouponDetails, extractHttpUrls, extractPageMetadata, extractValueGiftDetails, fetchUrlPreview, findFamimaProductImage, isSupportedPreviewImage } from "./lineUrl.js";
 
 test("LINEテキストから通常URLを取り出す", () => {
   assert.deepEqual(
@@ -60,4 +61,23 @@ test("ファミマの券面からバーコード以外の商品画像を選ぶ",
     findFamimaProductImage(html, "https://ncpfa.famima.com/contents/coupon.html", "キリン陸ハイボール 350ml缶（税込206円）"),
     "https://ncpfa.famima.com/products/riku.png?signature=qr-random-token"
   );
+});
+
+test("valuegiftの券名と利用期限を取得する", () => {
+  const html = `<html><head>
+    <title>27年9月期限 株主優待券 | 株式会社すかいらーくホールディングス</title>
+    <meta property="og:title" content="株式会社すかいらーくホールディングス">
+  </head><body>
+    <div>27年9月期限 株主優待券</div><div>2027年9月30日 23時59分 まで有効</div>
+  </body></html>`;
+  assert.deepEqual(extractValueGiftDetails(html), {
+    productName: "株式会社すかいらーくホールディングス 27年9月期限 株主優待券",
+    expiresAt: "2027-09-30",
+  });
+});
+
+test("octet-streamでも中身が画像なら券面画像として扱う", async () => {
+  const image = await sharp({ create: { width: 2, height: 2, channels: 3, background: "white" } }).jpeg().toBuffer();
+  assert.equal(await isSupportedPreviewImage(image, "application/octet-stream"), true);
+  assert.equal(await isSupportedPreviewImage(Buffer.from("not an image"), "application/octet-stream"), false);
 });

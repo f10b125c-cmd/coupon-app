@@ -32,6 +32,8 @@ LINEグループの通常URLは、タイトルとOG画像の取得を試して�
 
 2026-09-30追加: `valuegift.jp` の電子優待券はOG画像がJPEGでも `application/octet-stream` で配信される。`fetchUrlPreview()` はこの形式に限りSharpで画像の実体を検証し、券面画像を `productImage`、ページtitleから券名、本文から有効期限として返す。Webhookは `productImageDataUrl` に保存するため、URLのままでも詳細に券面画像が出る。未整理でもこの画像が揃ったvaluegift券は閲覧表示で開き、「券面を開いて利用する」で元ページを別タブへ開く。元サイトの `X-Frame-Options: SAMEORIGIN` によりiframe埋め込みは不可。残高と利用コードは変化するので静的保存しない。2026-09-30の既存3件（`line-634004237965066277-url-1` ～ `-3`）にも券面画像・券名・期限を反映済み。単体テストは `api/_lib/lineUrl.test.js`、スマホUIは `e2e/detail-navigation.spec.js`。
 
+同日追記: 上記3件が未整理に残ったのは `saveUrlCouponFromLine()` が情報の取得結果に関係なく `inbox: true` を保存していたため。現在は券名・期限・店舗・券面画像が揃うURL券を自動で未使用にする。valuegiftの同一URLは再投稿されても同じIDになるようURLのハッシュを使い、以前のLINE取込レコードもURL照合して重複を防ぐ。9月24日・29日投稿の6件は9月30日の3件とURLが完全一致し、画像・手入力・使用履歴のない空コピーだったので削除済み。9月30日の画像付き3件は未使用へ移動済み。テストは同じリンクのID安定性と自動振り分け条件を確認する。
+
 ## 開発・確認・公開
 
 ```bash

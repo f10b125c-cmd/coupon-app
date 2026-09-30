@@ -18,6 +18,28 @@ const MAX_DATA_URL_CHARS = 700 * 1024;
 // ファミマURL由来の各画像は小さめに圧縮して合計サイズに余裕を持たせる。
 const MAX_FAMIMA_IMAGE_DATA_URL_CHARS = 340 * 1024;
 
+function isValueGiftUrl(url) {
+  try {
+    return new URL(url).hostname === "valuegift.jp";
+  } catch {
+    return false;
+  }
+}
+
+export function couponIdForUrl(messageId, index, url) {
+  if (isValueGiftUrl(url)) {
+    return `line-url-${crypto.createHash("sha256").update(url).digest("hex").slice(0, 32)}`;
+  }
+  return `line-${messageId}-url-${index + 1}`;
+}
+
+export function isReadyUrlCoupon(preview, imageDataUrl, productImageDataUrl) {
+  return Boolean(
+    preview.productName && preview.expiresAt && preview.store &&
+    (imageDataUrl || productImageDataUrl)
+  );
+}
+
 function verifySignature(rawBody, signature, channelSecret) {
   if (!signature) return false;
   const expected = crypto
@@ -92,7 +114,7 @@ async function saveCouponFromLine(db, messageId, imageDataUrl) {
 
 async function saveUrlCouponFromLine(db, messageId, index, url, preview) {
   const now = new Date().toISOString();
-  const id = `line-${messageId}-url-${index + 1}`;
+  const id = couponIdForUrl(messageId, index, url);
   let imageDataUrl = null;
   let productImageDataUrl = null;
   if (preview.image) {
@@ -114,27 +136,33 @@ async function saveUrlCouponFromLine(db, messageId, index, url, preview) {
       console.warn("[line-webhook] product image conversion failed", messageId, e?.message || e);
     }
   }
-  await db.doc(`households/${HOUSEHOLD_ID}/coupons/${id}`).set({
-    id,
-    title: preview.title || "",
-    productName: preview.productName || "",
-    sourceType: imageDataUrl ? "screenshot" : "url",
-    url: preview.finalUrl || url,
-    imageDataUrl,
-    productImageDataUrl,
-    expiresAt: preview.expiresAt || "",
-    // 過去の取得コードが返していた `familymart` も画面側の内部キーへ正規化する。
-    store: preview.store === "familymart" ? "famima" : preview.store || "",
-    barcode: "",
-    autoScanned: preview.autoScanned ?? !imageDataUrl,
-    inbox: true,
-    status: "unused",
-    memo: "",
-    createdAt: now,
-    updatedAt: now,
-    usedAt: null,
-    source: "line",
-  });
+  const readyToUse = isReadyUrlCoupon(preview, imageDataUrl, productImageDataUrl);
+  try {
+    await db.doc(`households/${HOUSEHOLD_ID}/coupons/${id}`).create({
+      id,
+      title: preview.title || "",
+      productName: preview.productName || "",
+      sourceType: imageDataUrl ? "screenshot" : "url",
+      url: preview.finalUrl || url,
+      imageDataUrl,
+      productImageDataUrl,
+      expiresAt: preview.expiresAt || "",
+      // 過去の取得コードが返していた `familymart` も画面側の内部キーへ正規化する。
+      store: preview.store === "familymart" ? "famima" : preview.store || "",
+      barcode: "",
+      autoScanned: preview.autoScanned ?? !imageDataUrl,
+      inbox: !readyToUse,
+      status: "unused",
+      memo: "",
+      createdAt: now,
+      updatedAt: now,
+      usedAt: null,
+      source: "line",
+    });
+  } catch (error) {
+    if (error.code === 6) return { id, duplicate: true };
+    throw error;
+  }
   return { id, hasImage: !!imageDataUrl, hasProductImage: !!productImageDataUrl };
 }
 
@@ -195,9 +223,14 @@ export async function POST(request) {
       if (event.message?.type !== "text") continue;
       const urls = extractHttpUrls(event.message.text).slice(0, 3);
       for (let index = 0; index < urls.length; index++) {
-        const id = `line-${event.message.id}-url-${index + 1}`;
+        const id = couponIdForUrl(event.message.id, index, urls[index]);
         const docRef = db.doc(`households/${HOUSEHOLD_ID}/coupons/${id}`);
         if ((await docRef.get()).exists) continue;
+        if (isValueGiftUrl(urls[index])) {
+          const sameUrl = await db.collection(`households/${HOUSEHOLD_ID}/coupons`)
+            .where("url", "==", urls[index]).limit(1).get();
+          if (!sameUrl.empty) continue;
+        }
         let preview = { title: "", image: null, finalUrl: urls[index] };
         try {
           preview = new URL(urls[index]).hostname === "ncpfa.famima.com"
@@ -208,6 +241,7 @@ export async function POST(request) {
           console.warn("[line-webhook] URL preview unavailable", event.message.id, e?.message || e);
         }
         const saved = await saveUrlCouponFromLine(db, event.message.id, index, urls[index], preview);
+        if (saved.duplicate) continue;
         okCount++;
         console.log(`[line-webhook] saved URL coupon ${saved.id} image=${saved.hasImage} productImage=${saved.hasProductImage}`);
       }

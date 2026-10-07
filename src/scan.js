@@ -1268,6 +1268,8 @@ function isScreenshotChromeText(value) {
 function extractProductNameReading(lines) {
   const eligible = (lines || []).filter(line => !isScreenshotChromeText(line.text));
   const structured = extractQrGiftProduct(eligible) ||
+    extractKirinIchibanShiboriProduct(eligible) ||
+    extractKinmugiCouponProduct(eligible) ||
     extractJapaneseAleExchangeProduct(eligible) ||
     extractMultilineExchangeProduct(eligible);
   const guessed = structured || guessProductName(eligible, true) || guessProductName(eligible, false);
@@ -1302,6 +1304,33 @@ function extractQrGiftProduct(lines) {
     const amount = Number(match[1]);
     if (!Number.isSafeInteger(amount) || amount <= 0) continue;
     return `スシローのギフト ${amount.toLocaleString("ja-JP")}円`;
+  }
+  return "";
+}
+
+// ローソンのキリン券は商品見出しが2行になり、一般抽出だとページの小さな告知文や
+// 缶ロゴが優先されることがある。「一番搾り＋生ビール/350ml/無料引換」の実券見出し
+// を見つけた場合だけ、ブランドを含む名称へまとめる。
+function extractKirinIchibanShiboriProduct(lines) {
+  for (const { text } of lines || []) {
+    const compact = tidySpacing(text || "")
+      .replace(/[\s()[\]（）「」【】〈〉]/g, "");
+    if (/(?:キリン)?一番搾り(?:生ビール)?(?=350ml|無料|$)/u.test(compact)) {
+      return "キリン一番搾り";
+    }
+  }
+  return "";
+}
+
+// 金麦の缶クーポンでは、縮小画像で「金麦」が「人 金 表」、「500ml缶」が
+// 「500mi」のように崩れる実例がある。商品名と容量が同じOCR行に揃った場合だけ
+// 金麦の券面と判定し、説明文や他商品の「金」だけでは発火しないようにする。
+function extractKinmugiCouponProduct(lines) {
+  for (const { text } of lines || []) {
+    const compact = tidySpacing(text || "").replace(/\s+/g, "");
+    const hasKinmugi = /(?:人)?金(?:麦|表)/u.test(compact);
+    const has500Ml = /500m[l1i](?:缶)?/i.test(compact);
+    if (hasKinmugi && has500Ml) return "金麦 500ml缶";
   }
   return "";
 }
@@ -1407,6 +1436,17 @@ const KNOWN_PRODUCT_NAME_PATTERNS = [
 function normalizeKnownProductName(value) {
   if (!value) return "";
   const normalized = tidySpacing(value);
+  // 一番搾りの缶ロゴや券面見出しではメーカー名だけが落ちることがある。
+  // 一番搾り（生ビール）の同一名称に限って「キリン」を補い、他のキリン商品へ
+  // 適用範囲が広がらないよう、追加の味名・シリーズ名がある場合は対象外にする。
+  const compact = normalized.replace(/\s+/g, "").replace(/[〈〉「」【】()[\]（）]/g, "");
+  if (/^(?:キリン)?一番搾り(?:生ビール)?(?:350ml(?:缶)?)?$/u.test(compact)) {
+    return "キリン一番搾り";
+  }
+  // 「金麦 500mi … 人金表」のような低解像度OCRだけを実券に基づき補正する。
+  if (/(?:人)?金(?:麦|表)/u.test(compact) && /500m[l1i]/i.test(compact)) {
+    return "金麦 500ml缶";
+  }
   // 実画像で「夕映香る」が「夕映舌る」になった。プレモル2種の選択券の
   // 商品名全体が一致した場合だけ補正し、他のエールや容量へ流用しない。
   if (/^ザ・プレミアム・モルツ[/／]ザ・プレミアム・モルツ夕映[香舌]るエール350ml缶$/i

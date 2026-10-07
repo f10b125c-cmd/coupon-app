@@ -219,6 +219,23 @@ test("翠ジンソーダの先頭が崩れても特徴的な後半表記から�
   assert.equal(extractProductNameGuess(lines("すいじんそーだ")), "翠ジンソーダ");
 });
 
+test("金麦券の縮小OCRで金麦と500mlが同じ行にあれば商品名を復元する", () => {
+  const actual = lines("22 500mi AREIIRA YK 人 金 表");
+  assert.equal(extractProductNameGuess(actual), "金麦 500ml缶");
+  assert.equal(extractProductNameForRescan(actual, "てく豊潤は10/14より店頭での"), "金麦 500ml缶");
+  assert.notEqual(extractProductNameGuess(lines("金表 350ml缶")), "金麦 500ml缶");
+});
+
+test("一番搾り単独で認識されたときだけキリンのブランド名を補う", () => {
+  assert.equal(extractProductNameGuess(lines("一番搾り")), "キリン一番搾り");
+  assert.equal(extractProductNameForRescan(lines("一番搾り"), "一番搾り"), "キリン一番搾り");
+  assert.equal(
+    extractProductNameGuess(lines("キリ ン 一 番 搾 り 生ビール (350ml 缶 ) 無料引")),
+    "キリン一番搾り"
+  );
+  assert.equal(extractProductNameGuess(lines("一番搾り糖質ゼロ")), "一番搾り糖質ゼロ");
+});
+
 test("プレモルの実画像で、ロゴより商品名2行と容量の段落を優先する", () => {
   const productLines = [
     { text: "g ry =", y: 818, y1: 845 },

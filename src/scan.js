@@ -1269,6 +1269,7 @@ function extractProductNameReading(lines) {
   const eligible = (lines || []).filter(line => !isScreenshotChromeText(line.text));
   const structured = extractQrGiftProduct(eligible) ||
     extractKirinIchibanShiboriProduct(eligible) ||
+    extractKinmugiChoiceProduct(eligible) ||
     extractKinmugiCouponProduct(eligible) ||
     extractJapaneseAleExchangeProduct(eligible) ||
     extractMultilineExchangeProduct(eligible);
@@ -1318,6 +1319,24 @@ function extractKirinIchibanShiboriProduct(lines) {
     if (/(?:キリン)?一番搾り(?:生ビール)?(?=350ml|無料|$)/u.test(compact)) {
       return "キリン一番搾り";
     }
+  }
+  return "";
+}
+
+// 金麦の選択券は「金麦350ml缶・金麦〈豊潤〉350ml缶」の2候補と
+// 「いずれか1本」が別行に分かれる。OCRが「麦→青」「〈→て」と崩れても、
+// 2種類の金麦・容量2つ・選択文言が揃った券だけを専用判定し、案内文の末尾を
+// 商品名に採用しない。今後も選択式クーポンは各候補と選択アンカーをセットで確認する。
+function extractKinmugiChoiceProduct(lines) {
+  const compact = (lines || [])
+    .map(({ text }) => tidySpacing(text || "").replace(/\s+/g, ""))
+    .join("");
+  const hasFirstChoice = /金[麦青表]350ml缶?[・･/／]/u.test(compact);
+  const hasRichChoice = /金麦[〈<(（]*(?:て)?豊潤[〉>)）]*350ml缶?/u.test(compact);
+  const volumeCount = (compact.match(/350ml缶?/gi) || []).length;
+  const hasChoiceAnchor = /いずれか1本/.test(compact);
+  if (hasFirstChoice && hasRichChoice && volumeCount >= 2 && hasChoiceAnchor) {
+    return "金麦 350ml缶／金麦〈豊潤〉350ml缶";
   }
   return "";
 }

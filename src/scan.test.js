@@ -226,6 +226,22 @@ test("金麦券の縮小OCRで金麦と500mlが同じ行にあれば商品名を
   assert.notEqual(extractProductNameGuess(lines("金表 350ml缶")), "金麦 500ml缶");
 });
 
+test("金麦の選択式クーポンは2商品の表記といずれか1本の案内を揃えて読む", () => {
+  const actual = lines(
+    "®E350ml 缶 - RFE (2M) 350ml 缶",
+    "の うち いずれ か 1 本 無料 引換 え ク ー ポ ン",
+    "金 青 350ml 缶 ・ 金 麦 て 豊潤 〉) 350ml 缶 の い ず",
+    "れ か 1 本 で の ご 利用 可能"
+  );
+  const expected = "金麦 350ml缶／金麦〈豊潤〉350ml缶";
+  assert.equal(extractProductNameGuess(actual), expected);
+  assert.equal(extractProductNameForRescan(actual, "れか1本でのご利用可能"), expected);
+  assert.notEqual(
+    extractProductNameGuess(lines("金麦 350ml缶・金麦〈豊潤〉350ml缶")),
+    expected
+  );
+});
+
 test("一番搾り単独で認識されたときだけキリンのブランド名を補う", () => {
   assert.equal(extractProductNameGuess(lines("一番搾り")), "キリン一番搾り");
   assert.equal(extractProductNameForRescan(lines("一番搾り"), "一番搾り"), "キリン一番搾り");

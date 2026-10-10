@@ -252,6 +252,21 @@ test("一番搾り単独で認識されたときだけキリンのブランド�
   assert.equal(extractProductNameGuess(lines("一番搾り糖質ゼロ")), "一番搾り糖質ゼロ");
 });
 
+test("アサヒドライクリスタルの改行と缶容量の誤読を券面文言から補正する", () => {
+  const actual = lines(
+    "「 ア サ ヒ スー パー ドラ イ ドラ イク リス タル 人 ( 缶",
+    "350m り 」1 本 と 引換 えい た だ け ま す 。",
+    "ドア サビ スー パー ドラ イ ドラ イク リ メ ヌメ タル ( 牛 350mD 1 本 で の ご 利用 が 可能"
+  );
+  const expected = "アサヒスーパードライ ドライクリスタル（缶350ml）";
+  assert.equal(extractProductNameGuess(actual), expected);
+  assert.equal(extractProductNameForRescan(actual, "アサヒスーパードライドライクリスタル缶350mD"), expected);
+  assert.notEqual(
+    extractProductNameGuess(lines("アサヒスーパードライ ドライクリスタル 350ml缶")),
+    expected
+  );
+});
+
 test("プレモルの実画像で、ロゴより商品名2行と容量の段落を優先する", () => {
   const productLines = [
     { text: "g ry =", y: 818, y1: 845 },

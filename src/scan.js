@@ -1269,6 +1269,7 @@ function extractProductNameReading(lines) {
   const eligible = (lines || []).filter(line => !isScreenshotChromeText(line.text));
   const structured = extractQrGiftProduct(eligible) ||
     extractKirinIchibanShiboriProduct(eligible) ||
+    extractAsahiDryCrystalProduct(eligible) ||
     extractKinmugiChoiceProduct(eligible) ||
     extractKinmugiCouponProduct(eligible) ||
     extractJapaneseAleExchangeProduct(eligible) ||
@@ -1319,6 +1320,23 @@ function extractKirinIchibanShiboriProduct(lines) {
     if (/(?:キリン)?一番搾り(?:生ビール)?(?=350ml|無料|$)/u.test(compact)) {
       return "キリン一番搾り";
     }
+  }
+  return "";
+}
+
+// アサヒ「ドライクリスタル」は商品説明が2行に折り返され、缶の意匠も重なって
+// 「缶350ml」が「人(缶350mり)」「牛350mD」などに誤認される。
+// ブランド・商品シリーズ・350ml・引換文言が揃ったときだけ正規表記にする。
+function extractAsahiDryCrystalProduct(lines) {
+  const compact = (lines || [])
+    .map(({ text }) => tidySpacing(text || "").replace(/\s+/g, ""))
+    .join("");
+  const hasBrand = /アサヒスーパードライ/u.test(compact);
+  const hasProduct = /ドライクリスタル/u.test(compact);
+  const has350Ml = /350m(?:l|り|D|d|0|o|缶)/i.test(compact);
+  const hasExchange = /1本(?:と|で).*?引換|無料引換/u.test(compact);
+  if (hasBrand && hasProduct && has350Ml && hasExchange) {
+    return "アサヒスーパードライ ドライクリスタル（缶350ml）";
   }
   return "";
 }

@@ -252,6 +252,18 @@ test("一番搾り単独で認識されたときだけキリンのブランド�
   assert.equal(extractProductNameGuess(lines("一番搾り糖質ゼロ")), "一番搾り糖質ゼロ");
 });
 
+test("キリン晴れ風は圧縮でBNEと誤読されても券面の引換情報が揃えば補正する", () => {
+  const expected = "キリンビール 晴れ風 350ml";
+  const actual = lines("キリンビール BNE 350ml 1本と引き換えいただけます。");
+  assert.equal(extractProductNameGuess(actual), expected);
+  assert.equal(extractProductNameForRescan(actual, "キリンビール BNE 350ml"), expected);
+  assert.equal(extractProductNameGuess(lines("キリンビール BNE 350ml", "1本と引き換えいただけます。")), expected);
+  assert.equal(extractProductNameGuess(lines("キリンビール 晴れ風 350ml 1本と引換え")), expected);
+  assert.notEqual(extractProductNameGuess(lines("キリンビール BNE 350ml")), expected);
+  assert.notEqual(extractProductNameGuess(lines("サッポロ BNE 350ml 1本と引換え")), expected);
+  assert.notEqual(extractProductNameGuess(lines("キリンビール 一番搾り 350ml 1本と引換え")), expected);
+});
+
 test("アサヒドライクリスタルの改行と缶容量の誤読を券面文言から補正する", () => {
   const actual = lines(
     "「 ア サ ヒ スー パー ドラ イ ドラ イク リス タル 人 ( 缶",

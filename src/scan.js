@@ -1268,6 +1268,7 @@ function isScreenshotChromeText(value) {
 function extractProductNameReading(lines) {
   const eligible = (lines || []).filter(line => !isScreenshotChromeText(line.text));
   const structured = extractQrGiftProduct(eligible) ||
+    extractKirinHarekazeProduct(eligible) ||
     extractKirinIchibanShiboriProduct(eligible) ||
     extractAsahiDryCrystalProduct(eligible) ||
     extractKinmugiChoiceProduct(eligible) ||
@@ -1306,6 +1307,34 @@ function extractQrGiftProduct(lines) {
     const amount = Number(match[1]);
     if (!Number.isSafeInteger(amount) || amount <= 0) continue;
     return `スシローのギフト ${amount.toLocaleString("ja-JP")}円`;
+  }
+  return "";
+}
+
+// セブンの「キリンビール 晴れ風 350ml」券は、圧縮・縮小された券面で
+// 「晴れ風」が英字の「BNE」などに崩れることがある。メーカー名と容量だけで
+// 別のキリン商品を晴れ風にしないよう、誤読語（または晴れ風）と引換文言も
+// 近接したOCR行で確認できた場合に限って正規表記へ補正する。
+function extractKirinHarekazeProduct(lines) {
+  const candidates = lines || [];
+  for (let start = 0; start < candidates.length; start++) {
+    let paragraph = "";
+    for (let end = start; end < candidates.length && end < start + 3; end++) {
+      if (end > start) {
+        const above = candidates[end - 1];
+        const height = Math.max(1, (above.y1 || above.y) - above.y);
+        const gap = candidates[end].y - (above.y1 || above.y);
+        if (gap < 0 || gap > height * 2.2) break;
+      }
+      paragraph += tidySpacing(candidates[end].text || "").replace(/\s+/g, "");
+      const hasBrand = /キリンビール/u.test(paragraph);
+      const hasProduct = /晴れ風|BNE/i.test(paragraph);
+      const has350Ml = /350m(?:l|1|i)/i.test(paragraph);
+      const hasExchange = /1本(?:と|で).*?(?:引換|引き換え)|無料引換/u.test(paragraph);
+      if (hasBrand && hasProduct && has350Ml && hasExchange) {
+        return "キリンビール 晴れ風 350ml";
+      }
+    }
   }
   return "";
 }

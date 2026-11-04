@@ -8,3 +8,4 @@ serviceAccount*.json
 *-service-account*.json
 test-results
 playwright-report
+*.traineddata

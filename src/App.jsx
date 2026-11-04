@@ -19,7 +19,6 @@ import {
   scanText,
   detectStoreFromBarcode,
   extractExpiryDate,
-  extractProductNameForRescan,
   extractBarcodeNumberGuess,
   normalizeStoreKey,
 } from "./scan.js";
@@ -31,6 +30,7 @@ import {
 } from "./cloudStore.js";
 import { handoffImageToGoogleLens, selectLensImage } from "./lensSearch.js";
 import { sortCouponsByProduct } from "./couponSort.js";
+import { findDuplicateCoupon } from "./couponDuplicate.js";
 
 /* ---------------------------------------------------------
    フォント読み込み（やわらかい丸ゴシックの世界観に寄せる）
@@ -193,48 +193,6 @@ function resolveQrCode(raw, existingRaw = "", existingCodeType = "") {
   const decoded = normalizeScannedCode(raw, "qr");
   if (decoded) return decoded;
   return normalizeCodeType(existingCodeType) === "qr" ? String(existingRaw || "") : "";
-}
-
-// 完全一致がない場合に比較する末尾の桁数。バーコード画像が読み取れずOCRで一部の桁しか
-// 拾えなかった場合などのフォールバックで、家族内の少数のクーポンなら末尾一致でも衝突しにくい。
-const BARCODE_TAIL_MATCH_LEN = 5;
-
-// 同じバーコードを持つ、自分以外のクーポンを探す（重複登録チェック用）
-function findDuplicateCoupon(coupons, barcode, excludeId, codeType = "barcode") {
-  if (normalizeCodeType(codeType) === "qr") {
-    const target = String(barcode || "").trim();
-    if (!target) return null;
-    return (
-      coupons.find(
-        (c) =>
-          c.id !== excludeId &&
-          normalizeCodeType(c.codeType) === "qr" &&
-          String(c.barcode || "").trim() === target
-      ) || null
-    );
-  }
-  const target = normalizeBarcode(barcode);
-  if (!target) return null;
-  const exact = coupons.find(
-    (c) =>
-      c.id !== excludeId &&
-      normalizeCodeType(c.codeType) !== "qr" &&
-      normalizeBarcode(c.barcode) === target
-  );
-  if (exact) return exact;
-  if (target.length < BARCODE_TAIL_MATCH_LEN) return null;
-  const tail = target.slice(-BARCODE_TAIL_MATCH_LEN);
-  return (
-    coupons.find((c) => {
-      const cb = normalizeBarcode(c.barcode);
-      return (
-        c.id !== excludeId &&
-        normalizeCodeType(c.codeType) !== "qr" &&
-        cb.length >= BARCODE_TAIL_MATCH_LEN &&
-        cb.slice(-BARCODE_TAIL_MATCH_LEN) === tail
-      );
-    }) || null
-  );
 }
 
 /* ---------------------------------------------------------
@@ -595,6 +553,20 @@ function TicketCard({ coupon, onOpen, selected, onToggleSelect }) {
           <StampBadge status={status} />
         </div>
         <AutoFitCouponName>{displayName(coupon)}</AutoFitCouponName>
+        {coupon.productNameCandidate && (
+          <div
+            style={{
+              marginTop: 3,
+              color: COLORS.amber,
+              fontFamily: "'M PLUS Rounded 1c', sans-serif",
+              fontSize: 11,
+              fontWeight: 700,
+              overflowWrap: "anywhere",
+            }}
+          >
+            読取候補（未確認）: {coupon.productNameCandidate}
+          </div>
+        )}
         <div
           style={{
             display: "flex",
@@ -879,6 +851,7 @@ function DetailModal({
     !!coupon.inbox && !(isValueGiftCoupon && coupon.productImageDataUrl)
   );
   const [productName, setProductName] = useState(coupon.productName);
+  const [productNameCandidate, setProductNameCandidate] = useState(coupon.productNameCandidate || "");
   const [url, setUrl] = useState(coupon.url || "");
   const [imageDataUrl, setImageDataUrl] = useState(coupon.imageDataUrl || null);
   const productImageDataUrl = coupon.productImageDataUrl || null;
@@ -948,6 +921,7 @@ function DetailModal({
     let detectedStore = "";
     let detectedDate = "";
     let detectedName = "";
+    let suggestedName = "";
     try {
       setScanMessage("バーコードを解析中…");
       const barcodeResult = await scanBarcodeWithCrop(targetImage);
@@ -962,13 +936,19 @@ function DetailModal({
       }
 
       setScanMessage("文字を認識中…（初回は時間がかかります）");
-      const { text, lines } = await scanText(targetImage, (pct) =>
+      const { text, productName: scannedName, productNameConfidence } = await scanText(targetImage, (pct) =>
         setScanMessage(`文字を認識中…${pct}%`)
       );
       detectedDate = extractExpiryDate(text);
       if (detectedDate) setExpiresAt(detectedDate);
-      detectedName = extractProductNameForRescan(lines, productName || "");
-      if (detectedName && !productName) setProductName(detectedName);
+      detectedName = productNameConfidence === "high" ? scannedName : "";
+      suggestedName = productNameConfidence === "low" ? scannedName : "";
+      if (detectedName && !productName) {
+        setProductName(detectedName);
+        setProductNameCandidate("");
+      } else if (suggestedName) {
+        setProductNameCandidate(suggestedName);
+      }
 
       // ファミマの28桁のような密なバーコードは画像からだと解像度不足で読み取れないことがあるため、
       // 失敗した場合は印字されている数字をOCRで拾って代わりに使う
@@ -998,7 +978,8 @@ function DetailModal({
       const found = [
         detectedStore && `店舗:${storeLabel(detectedStore)}`,
         detectedDate && `期限:${detectedDate}`,
-        detectedName && `商品名候補:${detectedName}`,
+        detectedName && `商品名:${detectedName}`,
+        suggestedName && `商品名候補(未確認):${suggestedName}`,
         barcodeText && detectedCodeType === "qr" && "QRコード",
         barcodeText && barcodeSource === "ocr" && "バーコード番号(数字OCR)",
       ].filter(Boolean);
@@ -1145,6 +1126,7 @@ function DetailModal({
     onUpdate({
       ...coupon,
       productName,
+      productNameCandidate: productName.trim() ? "" : productNameCandidate,
       url,
       imageDataUrl: finalImage,
       productImageDataUrl,
@@ -1213,7 +1195,7 @@ function DetailModal({
         });
       }
       setScanMessage("文字を認識中…（初回は時間がかかります）");
-      const { text, lines } = await scanText(coupon.imageDataUrl, (pct) =>
+      const { text, productName: scannedName, productNameConfidence } = await scanText(coupon.imageDataUrl, (pct) =>
         setScanMessage(`文字を認識中…${pct}%`)
       );
       if (!barcodeText && detectedCodeType !== "qr") {
@@ -1222,11 +1204,13 @@ function DetailModal({
       }
       const detectedStore = detectedCodeType === "qr" ? "" : detectStoreFromBarcode(barcodeText);
       const detectedDate = extractExpiryDate(text);
-      const detectedName = extractProductNameForRescan(lines, coupon.productName || "");
+      const detectedName = productNameConfidence === "high" ? scannedName : "";
+      const suggestedName = productNameConfidence === "low" ? scannedName : "";
 
       const next = {
         ...coupon,
         productName: detectedName || coupon.productName || "",
+        productNameCandidate: detectedName ? "" : suggestedName || coupon.productNameCandidate || "",
         store: normalizeStoreKey(coupon.store) || detectedStore || "",
         expiresAt: detectedDate || coupon.expiresAt || "",
         barcode:
@@ -1247,6 +1231,7 @@ function DetailModal({
       onUpdate(next);
       // 編集画面に切り替えたときに古い値が出ないよう、入力欄の状態も揃えておく
       setProductName(next.productName);
+      setProductNameCandidate(next.productNameCandidate);
       setStore(next.store);
       setExpiresAt(next.expiresAt);
       setBarcode(next.barcode);
@@ -1259,7 +1244,11 @@ function DetailModal({
       ].filter(Boolean);
       setScanMessage(
         (updatedFields.length ? `${updatedFields.join("、")}に更新しました。` : "") +
-        (!detectedName ? "商品名は確実に読み取れなかったため、現在の商品名を保持しました。" : "")
+        (!detectedName
+          ? suggestedName
+            ? `確定できない候補「${suggestedName}」を表示し、現在の商品名を保持しました。`
+            : "商品名は確実に読み取れなかったため、現在の商品名を保持しました。"
+          : "")
       );
     } catch (e) {
       console.error("[rescanAndOverwrite] 読み取りに失敗しました", e);
@@ -1306,9 +1295,15 @@ function DetailModal({
   function registerLensProductName() {
     const nextName = lensProductName.trim();
     if (!nextName) return;
-    const next = { ...coupon, productName: nextName, updatedAt: new Date().toISOString() };
+    const next = {
+      ...coupon,
+      productName: nextName,
+      productNameCandidate: "",
+      updatedAt: new Date().toISOString(),
+    };
     onUpdate(next);
     setProductName(nextName);
+    setProductNameCandidate("");
     setLensProductName("");
     setLensRegistrationOpen(false);
     setLensMessage(`商品名を「${nextName}」に更新しました。`);
@@ -1674,6 +1669,31 @@ function DetailModal({
                 {url.trim().startsWith("https://valuegift.jp/") ? "券面を開いて利用する" : "URLを開いてスキャン"}
                 <ExternalLink size={13} />
               </a>
+            )}
+            {productNameCandidate && (
+              <div
+                role="status"
+                style={{
+                  marginBottom: 12,
+                  padding: 10,
+                  borderRadius: 10,
+                  border: `1px solid ${COLORS.amber}`,
+                  background: COLORS.amberSoft,
+                  color: COLORS.ink,
+                  fontFamily: "'M PLUS Rounded 1c', sans-serif",
+                  fontSize: 12,
+                  lineHeight: 1.6,
+                }}
+              >
+                <div>読み取り候補（未確認）: <strong>{productNameCandidate}</strong></div>
+                <button
+                  type="button"
+                  onClick={() => setProductName(productNameCandidate)}
+                  style={{ ...secondaryBtn, marginTop: 7, padding: "6px 10px", fontSize: 12 }}
+                >
+                  候補を商品名欄に入れる
+                </button>
+              </div>
             )}
             <label style={fieldLabel}>
               商品名
@@ -2442,6 +2462,7 @@ export default function CouponApp() {
       id: uid(),
       title: "",
       productName: "",
+      productNameCandidate: "",
       sourceType,
       url,
       imageDataUrl,
@@ -2472,7 +2493,7 @@ export default function CouponApp() {
           const barcodeResult = await scanBarcodeWithCrop(imageDataUrl);
           let barcodeText = barcodeResult.text;
           let detectedCodeType = normalizeCodeType(barcodeResult.codeType);
-          const { text, lines } = await scanText(imageDataUrl);
+          const { text, productName: scannedName, productNameConfidence } = await scanText(imageDataUrl);
           // 画像からのバーコード読み取りが失敗した場合、印字されている数字をOCRで拾って代用する
           // （ファミマの28桁のような密なバーコードは画像解像度不足で失敗しやすいため）
           if (!barcodeText && detectedCodeType !== "qr") {
@@ -2481,14 +2502,15 @@ export default function CouponApp() {
           }
           const detectedStore = detectedCodeType === "qr" ? "" : detectStoreFromBarcode(barcodeText);
           const detectedDate = extractExpiryDate(text);
-          const detectedName = extractProductNameForRescan(lines, toSave.productName || "");
+          const detectedName = productNameConfidence === "high" ? scannedName : "";
+          const suggestedName = productNameConfidence === "low" ? scannedName : "";
           const dup = barcodeText
             ? findDuplicateCoupon(coupons, barcodeText, coupon.id, detectedCodeType)
             : null;
 
           // 店舗まで判別でき、重複でもない画像は、その場で未整理から
           // 該当店舗の未使用一覧へ振り分ける。要確認のものだけ未整理に残す。
-          const canAutoRegister = !!detectedStore && !dup;
+          const canAutoRegister = !!detectedStore && !dup && !!detectedName;
           toSave = {
             ...toSave,
             barcode: detectedCodeType === "qr"
@@ -2501,6 +2523,7 @@ export default function CouponApp() {
             store: detectedStore || "",
             expiresAt: detectedDate || "",
             productName: detectedName || "",
+            productNameCandidate: suggestedName || "",
             autoScanned: true,
             inbox: !canAutoRegister,
             updatedAt: new Date().toISOString(),
@@ -2568,9 +2591,10 @@ export default function CouponApp() {
     }
 
     setBulkScanProgress({ done: 0, total: targets.length });
-    let filledCount = 0;
     let dupCount = 0;
     let autoMovedCount = 0;
+    let confidentNameCount = 0;
+    let candidateCount = 0;
     // 同じバッチ内に同じクーポンが複数枚あっても重複判定できるよう、
     // 保存するたびに手元のリストも更新しながら進める
     let knownCoupons = [...coupons];
@@ -2581,32 +2605,35 @@ export default function CouponApp() {
         const barcodeResult = await scanBarcodeWithCrop(c.imageDataUrl);
         let barcodeText = barcodeResult.text;
         let detectedCodeType = normalizeCodeType(barcodeResult.codeType);
-        const { text, lines } = await scanText(c.imageDataUrl);
+        const { text, productName: scannedName, productNameConfidence } = await scanText(c.imageDataUrl);
         if (!barcodeText && detectedCodeType !== "qr") {
           barcodeText = extractBarcodeNumberGuess(text);
           if (barcodeText) detectedCodeType = "barcode";
         }
         const detectedStore = detectedCodeType === "qr" ? "" : detectStoreFromBarcode(barcodeText);
         const detectedDate = extractExpiryDate(text);
-        const detectedName = extractProductNameForRescan(lines, c.productName || "");
+        const detectedName = productNameConfidence === "high" ? scannedName : "";
+        const suggestedName = productNameConfidence === "low" ? scannedName : "";
         const dup = barcodeText
           ? findDuplicateCoupon(knownCoupons, barcodeText, c.id, detectedCodeType)
           : null;
 
-        if (detectedStore || detectedDate || detectedName) filledCount++;
+        if (detectedName) confidentNameCount++;
+        if (suggestedName) candidateCount++;
         if (dup) dupCount++;
 
         // 店舗が判別でき、かつ重複の疑いがない＝読み取りがうまくいったものは
         // そのまま未使用へ自動登録する。判別できなかったもの・重複の疑いがあるものは
         // ユーザーの確認が必要なため未整理に残す。
-        const canAutoRegister = !!detectedStore && !dup;
+        const canAutoRegister = !!detectedStore && !dup && !!detectedName;
         if (canAutoRegister) autoMovedCount++;
 
         const updated = {
           ...c,
           store: normalizeStoreKey(c.store) || detectedStore || "",
           expiresAt: c.expiresAt || detectedDate || "",
-          productName: c.productName || detectedName || "",
+          productName: detectedName || c.productName || "",
+          productNameCandidate: detectedName ? "" : suggestedName || c.productNameCandidate || "",
           barcode:
             (detectedCodeType === "qr"
               ? resolveQrCode(barcodeText, c.barcode, c.codeType)
@@ -2635,7 +2662,9 @@ export default function CouponApp() {
     setBulkScanProgress(null);
     const needsReview = targets.length - autoMovedCount;
     window.alert(
-      `${targets.length}件を読み取りました（未使用に自動登録: ${autoMovedCount}件` +
+      `${targets.length}件を読み取りました（商品名を確定: ${confidentNameCount}件` +
+        (candidateCount ? `、確認候補: ${candidateCount}件` : "") +
+        `、未使用に自動登録: ${autoMovedCount}件` +
         (needsReview
           ? `、要確認のため未整理に残したもの: ${needsReview}件${dupCount ? `／うち重複の疑い: ${dupCount}件` : ""}`
           : "") +
@@ -2644,7 +2673,7 @@ export default function CouponApp() {
   }
 
   // 選択したクーポンをまとめて読み取り直す。
-  // 商品名と期限は読み取り精度の改善後に付け直すため、読めた値で既存値を上書きする。
+  // 商品名は高信頼度の読み取りだけ反映し、弱い結果は確認候補として分けて保存する。
   // 店舗・バーコードは手で直している可能性があるため、空のときだけ埋める。
   async function bulkScanSelected() {
     const targets = coupons.filter((c) => selectedIds.includes(c.id) && c.imageDataUrl);
@@ -2655,6 +2684,7 @@ export default function CouponApp() {
 
     setBulkScanProgress({ done: 0, total: targets.length });
     let nameCount = 0;
+    let candidateCount = 0;
     let dateCount = 0;
 
     for (let i = 0; i < targets.length; i++) {
@@ -2663,21 +2693,24 @@ export default function CouponApp() {
         const barcodeResult = await scanBarcodeWithCrop(c.imageDataUrl);
         let barcodeText = barcodeResult.text;
         let detectedCodeType = normalizeCodeType(barcodeResult.codeType);
-        const { text, lines } = await scanText(c.imageDataUrl);
+        const { text, productName: scannedName, productNameConfidence } = await scanText(c.imageDataUrl);
         if (!barcodeText && detectedCodeType !== "qr") {
           barcodeText = extractBarcodeNumberGuess(text);
           if (barcodeText) detectedCodeType = "barcode";
         }
         const detectedStore = detectedCodeType === "qr" ? "" : detectStoreFromBarcode(barcodeText);
         const detectedDate = extractExpiryDate(text);
-        const detectedName = extractProductNameForRescan(lines, c.productName || "");
+        const detectedName = productNameConfidence === "high" ? scannedName : "";
+        const suggestedName = productNameConfidence === "low" ? scannedName : "";
 
         if (detectedName) nameCount++;
+        if (suggestedName) candidateCount++;
         if (detectedDate) dateCount++;
 
         await saveCouponToCloud({
           ...c,
           productName: detectedName || c.productName || "",
+          productNameCandidate: detectedName ? "" : suggestedName || c.productNameCandidate || "",
           store: normalizeStoreKey(c.store) || detectedStore || "",
           expiresAt: detectedDate || c.expiresAt || "",
           barcode:
@@ -2707,8 +2740,8 @@ export default function CouponApp() {
     // 黙っていると「押したのに直らない」に見える。件数をはっきり伝える。
     const failed = targets.length - nameCount;
     notify(
-      `${targets.length}件を読み取り直しました（商品名: ${nameCount}件、期限: ${dateCount}件を更新）。` +
-        (failed ? `${failed}件は商品名を読み取れませんでした。開いて手入力してください。` : "")
+      `${targets.length}件を読み取り直しました（商品名を確定: ${nameCount}件、確認候補: ${candidateCount}件、期限: ${dateCount}件を更新）。` +
+        (failed ? `${failed}件は確定できていません。候補表示を確認するか、手入力してください。` : "")
     );
   }
 

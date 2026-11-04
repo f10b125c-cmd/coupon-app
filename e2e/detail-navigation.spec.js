@@ -163,6 +163,9 @@ test("詳細画面は件数だけを表示し、スワイプで前後移動す�
   expect(Math.abs(autoReadBox.y - editingCloseBox.y)).toBeLessThan(8);
   expect(editingCloseBox.x).toBeGreaterThan(autoReadBox.x + autoReadBox.width);
   await page.getByRole("button", { name: "編集画面を閉じる", exact: true }).click();
+  // 編集フォームが閉じて閲覧用の操作へ戻る前に合成touchを送ると、
+  // 全体テストの負荷時だけスワイプが取りこぼされることがある。
+  await expect(page.getByRole("button", { name: "編集する", exact: true })).toBeVisible();
 
   await page.evaluate(() => {
     window.__detailPageTransitions = [];

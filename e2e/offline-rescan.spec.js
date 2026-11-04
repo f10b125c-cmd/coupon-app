@@ -5,18 +5,24 @@ const NAME = "ザ・プレミアム・モルツ／ザ・プレミアム・モル
 const BLANK = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aU1sAAAAASUVORK5CYII=";
 const mkLines = texts => texts.map((text, i) => ({ text, y: i * 30, y1: i * 30 + 20 }));
 
-async function prepare(page, { productName = NAME, image = BLANK, ocrTexts } = {}) {
+async function prepare(page, { productName = NAME, image = BLANK, ocrTexts, forcedName = "", forcedConfidence = "none" } = {}) {
   await page.clock.setFixedTime(new Date("2026-09-05T00:00:00Z"));
-  await page.addInitScript(({ productName, image, forced }) => {
+  await page.addInitScript(({ productName, image, forced, forcedName, forcedConfidence }) => {
     window.__rescanWrites = [];
     window.__rescanResults = [];
-    window.__forcedOcr = forced;
+    window.__forcedOcr = forced ? { ...forced, productName: forcedName, productNameConfidence: forcedConfidence } : null;
     window.__testCoupon = {
       id: "offline-rescan", productName, imageDataUrl: image, expiresAt: "2026-09-22",
       store: "seven", barcode: "", status: "unused", inbox: false, autoScanned: true,
       memo: "変更しないメモ", createdAt: "2026-09-05T00:00:00Z", updatedAt: "2026-09-05T00:00:00Z",
     };
-  }, { productName, image, forced: ocrTexts ? { text: ocrTexts.join("\n"), lines: mkLines(ocrTexts) } : null });
+  }, {
+    productName,
+    image,
+    forced: ocrTexts ? { text: ocrTexts.join("\n"), lines: mkLines(ocrTexts) } : null,
+    forcedName,
+    forcedConfidence,
+  });
 
   const unexpectedRequests = [];
   await page.route(/https:\/\/[^/]*(?:googleapis\.com|firebaseio\.com)\//, route => {
@@ -78,15 +84,35 @@ test("選択再読でも端末表示へ上書きしない", async ({ page }) => 
   const { unexpectedRequests } = await prepare(page, { ocrTexts: ["ul dokcomo会"] });
   await page.getByRole("checkbox").click();
   await page.getByRole("button", { name: "読み取り直す", exact: true }).click();
-  await expect(page.getByText(/商品名: 0件/)).toBeVisible();
+  await expect(page.getByText(/商品名を確定: 0件/)).toBeVisible();
   expect(await page.evaluate(() => window.__testCoupon.productName)).toBe(NAME);
   expect(unexpectedRequests).toEqual([]);
 });
 
 test("根拠のある商品名は個別再読で更新する", async ({ page }) => {
-  const { unexpectedRequests } = await prepare(page, { ocrTexts: ["「Coca-Cola」無料引換券"] });
+  const { unexpectedRequests } = await prepare(page, {
+    ocrTexts: ["「Coca-Cola」無料引換券"],
+    forcedName: "Coca-Cola",
+    forcedConfidence: "high",
+  });
   await clickDetailRescan(page);
   expect(await page.evaluate(() => window.__testCoupon.productName)).toBe("Coca-Cola");
+  expect(unexpectedRequests).toEqual([]);
+});
+
+test("確信度が低い商品名は既存名を残して未確認候補として保存する", async ({ page }) => {
+  const { unexpectedRequests } = await prepare(page, {
+    productName: "登録済み商品名",
+    ocrTexts: ["Red Bull"],
+    forcedName: "Red Bull",
+    forcedConfidence: "low",
+  });
+  await clickDetailRescan(page, "登録済み商品名");
+  await expect(page.getByText(/確定できない候補「Red Bull」/)).toBeVisible();
+  await expect(page.getByText("読取候補（未確認）: Red Bull")).toBeVisible();
+  const saved = await page.evaluate(() => window.__testCoupon);
+  expect(saved.productName).toBe("登録済み商品名");
+  expect(saved.productNameCandidate).toBe("Red Bull");
   expect(unexpectedRequests).toEqual([]);
 });
 

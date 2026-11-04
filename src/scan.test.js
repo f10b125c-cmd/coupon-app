@@ -12,6 +12,7 @@ import {
   extractExpiryDate,
   extractProductNameGuess,
   extractProductNameForRescan,
+  findCouponHeadlineRetryRects,
   findProductNameRetryRect,
   normalizeStoreKey,
 } from "./scan.js";
@@ -240,6 +241,14 @@ test("金麦の選択式クーポンは2商品の表記といずれか1本の案
     extractProductNameGuess(lines("金麦 350ml缶・金麦〈豊潤〉350ml缶")),
     expected
   );
+
+  // 実データの「350mlI缶」誤読も、2商品・容量・選択案内が揃うときだけ復元する。
+  const iCanMisread = lines(
+    "金表 350ml缶・金麦〈て豊潤〉350mlI缶のうちいずれ",
+    "か1本でのご利用可能"
+  );
+  assert.equal(extractProductNameGuess(iCanMisread), expected);
+  assert.equal(extractProductNameForRescan(iCanMisread, "金表 350ml缶"), expected);
 });
 
 test("一番搾り単独で認識されたときだけキリンのブランド名を補う", () => {
@@ -252,16 +261,97 @@ test("一番搾り単独で認識されたときだけキリンのブランド�
   assert.equal(extractProductNameGuess(lines("一番搾り糖質ゼロ")), "一番搾り糖質ゼロ");
 });
 
+test("ローソンの本麒麟は見出しのOCR崩れを商品名へ補正する", () => {
+  const expected = "本麒麟 350ml缶";
+  const realCouponHeadings = [
+    "本 上 央 鹿 (350ml 缶 ) 無料 引き 換え クー ポン",
+    "本 雪 麟 (350ml 缶 ) 無料 引き 換え クー ポン",
+    "本 上 妥 麟 (350ml 缶 ) 無料 引き 換え クー ポン",
+    "本 卓 上 麟 (350ml 缶 ) 無料 引き 換え クー ポン",
+  ];
+
+  for (const heading of realCouponHeadings) {
+    assert.equal(extractProductNameGuess(lines(heading)), expected, heading);
+    assert.equal(extractProductNameForRescan(lines(heading), "長期低温熟成"), expected, heading);
+  }
+
+  // 350ml券でも別の商品名には専用補正を使わない。
+  assert.notEqual(
+    extractProductNameGuess(lines("本搾り (350ml 缶) 無料引き換えクーポン")),
+    expected
+  );
+  assert.notEqual(
+    extractProductNameGuess(lines("本 上 妥 麟 350ml 缶")),
+    expected
+  );
+});
+
+test("商品名と無料引換クーポンが同じ見出しにあれば、券面見出しから商品名を抽出する", () => {
+  assert.equal(
+    extractProductNameGuess(lines("レモンスカッシュ 250ml缶 無料引き換えクーポン")),
+    "レモンスカッシュ 250ml缶"
+  );
+  assert.equal(
+    extractProductNameGuess(lines("翠ジンソーダ", "本格濃いめ 500ml缶", "1本無料引換えクーポン")),
+    "翠ジンソーダ本格濃いめ 500ml缶"
+  );
+  assert.notEqual(
+    extractProductNameGuess(lines("キャンペーンで当たる！商品を紹介します")),
+    "キャンペーンで当たる！"
+  );
+});
+
+test("券面見出しの文字位置を切り出し、端末表示や広告は再読範囲から外す", () => {
+  const rects = findCouponHeadlineRetryRects([
+    { text: "11:50 LTE 74%", x: 8, x1: 160, y: 8, y1: 28 },
+    { text: "キャンペーンのお知らせ", x: 90, x1: 470, y: 120, y1: 142 },
+    { text: "本上妥麟 (350ml缶) 無料引き換えクーポン", x: 150, x1: 620, y: 260, y1: 288 },
+  ], 750, 1600);
+
+  assert.equal(rects.length, 1);
+  assert.ok(rects[0].x > 0);
+  assert.ok(rects[0].width < 750);
+  assert.ok(rects[0].y > 200);
+  assert.ok(rects[0].y + rects[0].height < 340);
+  assert.deepEqual(findCouponHeadlineRetryRects([
+    { text: "無料引換クーポン", x: 10, x1: 300, y: 10, y1: 30 },
+  ], 750, 1600), []);
+});
+
 test("キリン晴れ風は圧縮でBNEと誤読されても券面の引換情報が揃えば補正する", () => {
   const expected = "キリンビール 晴れ風 350ml";
   const actual = lines("キリンビール BNE 350ml 1本と引き換えいただけます。");
   assert.equal(extractProductNameGuess(actual), expected);
   assert.equal(extractProductNameForRescan(actual, "キリンビール BNE 350ml"), expected);
   assert.equal(extractProductNameGuess(lines("キリンビール BNE 350ml", "1本と引き換えいただけます。")), expected);
+  // 実保存値は BNE ではなく BENE と誤読されていた。短縮形だけの回帰では再発を見逃す。
+  const bene = lines("キリンビール BENE 350ml 1本と引き換えいただけます。");
+  assert.equal(extractProductNameGuess(bene), expected);
+  assert.equal(extractProductNameForRescan(bene, "キリンビール BENE 350ml"), expected);
   assert.equal(extractProductNameGuess(lines("キリンビール 晴れ風 350ml 1本と引換え")), expected);
   assert.notEqual(extractProductNameGuess(lines("キリンビール BNE 350ml")), expected);
+  assert.notEqual(extractProductNameGuess(lines("キリンビール BENE 350ml")), expected);
   assert.notEqual(extractProductNameGuess(lines("サッポロ BNE 350ml 1本と引換え")), expected);
   assert.notEqual(extractProductNameGuess(lines("キリンビール 一番搾り 350ml 1本と引換え")), expected);
+});
+
+test("セブンイレブン名や英数字コードを商品名として採用しない", () => {
+  for (const storeLabel of [
+    "セフン - イワン",
+    "②セフン - アワン",
+    "セフン - イアルワン",
+    "②③②セフン - アルン",
+    "セブン-イレブン",
+  ]) {
+    assert.equal(extractProductNameGuess(lines(storeLabel)), "", storeLabel);
+    assert.equal(extractProductNameForRescan(lines(storeLabel), "商品名未設定"), "", storeLabel);
+  }
+  assert.equal(extractProductNameGuess(lines("@ETs-11Ty")), "");
+  assert.equal(extractProductNameForRescan(lines("@ETs-11Ty"), "商品名未設定"), "");
+  assert.equal(
+    extractProductNameGuess(lines("セブン-イレブン限定 金麦500ml缶 1本無料引換")),
+    "金麦 500ml缶"
+  );
 });
 
 test("アサヒドライクリスタルの改行と缶容量の誤読を券面文言から補正する", () => {

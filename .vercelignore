@@ -1,5 +1,6 @@
 .git
 .vercel
+.claude
 node_modules
 dist
 .DS_Store

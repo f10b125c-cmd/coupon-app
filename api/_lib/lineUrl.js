@@ -252,6 +252,42 @@ export function extractValueGiftDetails(html) {
   return { productName, expiresAt };
 }
 
+// Starbucks / Baskin-Robbins gift URLs can be private, tokenized pages whose
+// HTML exposes only a generic site title (or blocks preview fetching entirely).
+// Use the known host as a safe brand-level name; never infer denomination or item.
+export function extractKnownEgiftDetails(value) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:") return null;
+
+  const brandByHost = {
+    "gift.starbucks.co.jp": "スターバックス",
+    "br31.e-gift.co": "サーティワン",
+  };
+  const brand = brandByHost[url.hostname.toLowerCase()];
+  if (!brand) return null;
+
+  const productName = `${brand} eGift`;
+  return {
+    title: productName,
+    productName,
+    expiresAt: "",
+    store: "other",
+    image: null,
+    finalUrl: url.href,
+    autoScanned: true,
+    recognizedDigitalGift: true,
+  };
+}
+
+export function getUrlPreviewFallback(value) {
+  return extractKnownEgiftDetails(value) || { title: "", image: null, finalUrl: value };
+}
+
 export async function isSupportedPreviewImage(buffer, contentType) {
   if (contentType.startsWith("image/")) return true;
   if (!contentType.startsWith("application/octet-stream")) return false;
@@ -315,11 +351,14 @@ export async function fetchFamimaCouponPreview(value) {
 
 export async function fetchUrlPreview(value) {
   const page = await fetchPublic(value, MAX_HTML_BYTES, "text/html,application/xhtml+xml,image/*;q=0.8,*/*;q=0.1");
+  const knownEgiftDetails = extractKnownEgiftDetails(page.finalUrl);
   if (await isSupportedPreviewImage(page.buffer, page.contentType)) {
-    return { title: "", image: page.buffer, finalUrl: page.finalUrl };
+    return knownEgiftDetails
+      ? { ...knownEgiftDetails, image: page.buffer, finalUrl: page.finalUrl }
+      : { title: "", image: page.buffer, finalUrl: page.finalUrl };
   }
   if (!page.contentType.includes("text/html") && !page.contentType.includes("application/xhtml+xml")) {
-    return { title: "", image: null, finalUrl: page.finalUrl };
+    return knownEgiftDetails || { title: "", image: null, finalUrl: page.finalUrl };
   }
   const html = page.buffer.toString("utf8");
   const metadata = extractPageMetadata(html, page.finalUrl);
@@ -336,7 +375,7 @@ export async function fetchUrlPreview(value) {
         finalUrl: page.finalUrl,
         autoScanned: true,
       }
-    : { title: metadata.title, image: null, finalUrl: page.finalUrl };
+    : knownEgiftDetails || { title: metadata.title, image: null, finalUrl: page.finalUrl };
   if (!metadata.imageUrl) return fallback;
   try {
     const image = await fetchPublic(metadata.imageUrl, MAX_IMAGE_BYTES, "image/*");
@@ -344,7 +383,7 @@ export async function fetchUrlPreview(value) {
       return fallback;
     }
     if (valueGiftDetails) return { ...fallback, productImage: image.buffer };
-    return { title: metadata.title, image: image.buffer, finalUrl: page.finalUrl };
+    return { ...fallback, image: image.buffer, finalUrl: page.finalUrl };
   } catch {
     return fallback;
   }

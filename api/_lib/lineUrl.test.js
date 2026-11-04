@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import sharp from "sharp";
-import { extractFamimaCouponDetails, extractHttpUrls, extractPageMetadata, extractValueGiftDetails, fetchUrlPreview, findFamimaProductImage, isSupportedPreviewImage } from "./lineUrl.js";
+import { extractFamimaCouponDetails, extractHttpUrls, extractKnownEgiftDetails, extractPageMetadata, extractValueGiftDetails, fetchUrlPreview, findFamimaProductImage, getUrlPreviewFallback, isSupportedPreviewImage } from "./lineUrl.js";
 import { couponIdForUrl, isReadyUrlCoupon } from "../line-webhook.js";
 
 test("LINEテキストから通常URLを取り出す", () => {
@@ -77,6 +77,26 @@ test("valuegiftの券名と利用期限を取得する", () => {
   });
 });
 
+test("スタバとサーティワンのeGift URLは商品名とその他タグを補う", () => {
+  const starbucks = extractKnownEgiftDetails("https://gift.starbucks.co.jp/gift/secret-token");
+  assert.equal(starbucks.productName, "スターバックス eGift");
+  assert.equal(starbucks.title, "スターバックス eGift");
+  assert.equal(starbucks.store, "other");
+  assert.equal(starbucks.recognizedDigitalGift, true);
+  assert.equal(starbucks.expiresAt, "");
+
+  const baskinRobbins = extractKnownEgiftDetails("https://br31.e-gift.co/gift/secret-token");
+  assert.equal(baskinRobbins.productName, "サーティワン eGift");
+  assert.equal(baskinRobbins.store, "other");
+  assert.equal(extractKnownEgiftDetails("https://example.com/gift"), null);
+  assert.equal(extractKnownEgiftDetails("http://gift.starbucks.co.jp/gift"), null);
+
+  const failedPreview = getUrlPreviewFallback("https://br31.e-gift.co/gift/secret-token");
+  assert.equal(failedPreview.productName, "サーティワン eGift");
+  assert.equal(failedPreview.store, "other");
+  assert.equal(failedPreview.recognizedDigitalGift, true);
+});
+
 test("octet-streamでも中身が画像なら券面画像として扱う", async () => {
   const image = await sharp({ create: { width: 2, height: 2, channels: 3, background: "white" } }).jpeg().toBuffer();
   assert.equal(await isSupportedPreviewImage(image, "application/octet-stream"), true);
@@ -95,4 +115,5 @@ test("券名・期限・店舗と券面画像が揃ったURL券だけ未使用�
   assert.equal(isReadyUrlCoupon(preview, null, "data:image/jpeg;base64,abc"), true);
   assert.equal(isReadyUrlCoupon({ ...preview, expiresAt: "" }, null, "data:image/jpeg;base64,abc"), false);
   assert.equal(isReadyUrlCoupon(preview, null, null), false);
+  assert.equal(isReadyUrlCoupon(extractKnownEgiftDetails("https://br31.e-gift.co/gift/token"), null, null), true);
 });

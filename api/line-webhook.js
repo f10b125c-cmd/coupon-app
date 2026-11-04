@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import sharp from "sharp";
 import { getDb } from "./_lib/firebaseAdmin.js";
-import { extractHttpUrls, fetchFamimaCouponPreview, fetchUrlPreview } from "./_lib/lineUrl.js";
+import { extractHttpUrls, fetchFamimaCouponPreview, fetchUrlPreview, getUrlPreviewFallback } from "./_lib/lineUrl.js";
 
 // 家族LINEグループに投稿されたクーポン画像またはURLを受け取り、
 // アプリの「未整理」としてFirestoreに登録するwebhook。
@@ -34,9 +34,14 @@ export function couponIdForUrl(messageId, index, url) {
 }
 
 export function isReadyUrlCoupon(preview, imageDataUrl, productImageDataUrl) {
+  const recognizedDigitalGift = Boolean(
+    preview?.recognizedDigitalGift && preview.productName && preview.store === "other"
+  );
   return Boolean(
-    preview.productName && preview.expiresAt && preview.store &&
-    (imageDataUrl || productImageDataUrl)
+    recognizedDigitalGift || (
+      preview.productName && preview.expiresAt && preview.store &&
+      (imageDataUrl || productImageDataUrl)
+    )
   );
 }
 
@@ -231,13 +236,25 @@ export async function POST(request) {
             .where("url", "==", urls[index]).limit(1).get();
           if (!sameUrl.empty) continue;
         }
-        let preview = { title: "", image: null, finalUrl: urls[index] };
+        let preview = getUrlPreviewFallback(urls[index]);
         try {
-          preview = new URL(urls[index]).hostname === "ncpfa.famima.com"
+          const fetchedPreview = new URL(urls[index]).hostname === "ncpfa.famima.com"
             ? await fetchFamimaCouponPreview(urls[index])
             : await fetchUrlPreview(urls[index]);
+          const knownGiftFallback = preview.recognizedDigitalGift ? preview : null;
+          preview = {
+            ...preview,
+            ...fetchedPreview,
+            ...(knownGiftFallback ? {
+              title: knownGiftFallback.title,
+              productName: knownGiftFallback.productName,
+              store: knownGiftFallback.store,
+              recognizedDigitalGift: true,
+            } : {}),
+          };
         } catch (e) {
-          // ページ側がBot取得を拒否しても、URLそのものは未整理へ残す。
+          // ページ側がBot取得を拒否してもURLを残し、既知eGiftはドメイン由来の
+          // 商品名・店舗情報を維持して「その他」へ振り分ける。
           console.warn("[line-webhook] URL preview unavailable", event.message.id, e?.message || e);
         }
         const saved = await saveUrlCouponFromLine(db, event.message.id, index, urls[index], preview);

@@ -8,6 +8,7 @@ import {
   calculateSlidingSquareCropRects,
   detectLinearBarcodeCropRect,
   detectStoreFromBarcode,
+  detectStoreFromText,
   extractBarcodeNumberGuess,
   extractExpiryDate,
   extractProductNameGuess,
@@ -493,6 +494,21 @@ test("ローソン券の空白区切り17桁バーコードを検出する", () 
     assert.equal(barcode.length, 17);
     assert.equal(detectStoreFromBarcode(barcode), "lawson");
   }
+});
+
+test("セブンのロゴOCRが少し崩れても画像上部から店舗を判定する", () => {
+  assert.equal(detectStoreFromText([
+    { text: "② セフン - イ ルク ブン", y: 207 },
+  ], 1600), "seven");
+  assert.equal(detectStoreFromText([
+    { text: "無料クーポン セブン-イレブン", y: 800 },
+  ], 1600), "");
+  assert.equal(detectStoreFromText([
+    { text: "セフン アワン", y: 120 },
+  ], 1600), "");
+  assert.equal(detectStoreFromText([
+    { text: "coupon.sej.co.jp", y: 1200 },
+  ], 1600), "seven");
 });
 
 test("ローソン券の店舗利用期限をOCRの崩れから復元する", () => {

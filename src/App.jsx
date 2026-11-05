@@ -936,7 +936,7 @@ function DetailModal({
       }
 
       setScanMessage("文字を認識中…（初回は時間がかかります）");
-      const { text, productName: scannedName, productNameConfidence } = await scanText(targetImage, (pct) =>
+      const { text, productName: scannedName, productNameConfidence, detectedTextStore } = await scanText(targetImage, (pct) =>
         setScanMessage(`文字を認識中…${pct}%`)
       );
       detectedDate = extractExpiryDate(text);
@@ -963,7 +963,7 @@ function DetailModal({
         }
       }
 
-      detectedStore = detectedCodeType === "qr" ? "" : detectStoreFromBarcode(barcodeText);
+      detectedStore = detectedCodeType === "qr" ? "" : detectStoreFromBarcode(barcodeText) || detectedTextStore;
       if (detectedStore) setStore(detectedStore);
       if (detectedCodeType === "qr") {
         setBarcode(resolveQrCode(barcodeText, coupon.barcode, coupon.codeType));
@@ -1195,14 +1195,14 @@ function DetailModal({
         });
       }
       setScanMessage("文字を認識中…（初回は時間がかかります）");
-      const { text, productName: scannedName, productNameConfidence } = await scanText(coupon.imageDataUrl, (pct) =>
+      const { text, productName: scannedName, productNameConfidence, detectedTextStore } = await scanText(coupon.imageDataUrl, (pct) =>
         setScanMessage(`文字を認識中…${pct}%`)
       );
       if (!barcodeText && detectedCodeType !== "qr") {
         barcodeText = extractBarcodeNumberGuess(text);
         if (barcodeText) detectedCodeType = "barcode";
       }
-      const detectedStore = detectedCodeType === "qr" ? "" : detectStoreFromBarcode(barcodeText);
+      const detectedStore = detectedCodeType === "qr" ? "" : detectStoreFromBarcode(barcodeText) || detectedTextStore;
       const detectedDate = extractExpiryDate(text);
       const detectedName = productNameConfidence === "high" ? scannedName : "";
       const suggestedName = productNameConfidence === "low" ? scannedName : "";
@@ -2493,14 +2493,14 @@ export default function CouponApp() {
           const barcodeResult = await scanBarcodeWithCrop(imageDataUrl);
           let barcodeText = barcodeResult.text;
           let detectedCodeType = normalizeCodeType(barcodeResult.codeType);
-          const { text, productName: scannedName, productNameConfidence } = await scanText(imageDataUrl);
+          const { text, productName: scannedName, productNameConfidence, detectedTextStore } = await scanText(imageDataUrl);
           // 画像からのバーコード読み取りが失敗した場合、印字されている数字をOCRで拾って代用する
           // （ファミマの28桁のような密なバーコードは画像解像度不足で失敗しやすいため）
           if (!barcodeText && detectedCodeType !== "qr") {
             barcodeText = extractBarcodeNumberGuess(text);
             if (barcodeText) detectedCodeType = "barcode";
           }
-          const detectedStore = detectedCodeType === "qr" ? "" : detectStoreFromBarcode(barcodeText);
+          const detectedStore = detectedCodeType === "qr" ? "" : detectStoreFromBarcode(barcodeText) || detectedTextStore;
           const detectedDate = extractExpiryDate(text);
           const detectedName = productNameConfidence === "high" ? scannedName : "";
           const suggestedName = productNameConfidence === "low" ? scannedName : "";
@@ -2605,12 +2605,12 @@ export default function CouponApp() {
         const barcodeResult = await scanBarcodeWithCrop(c.imageDataUrl);
         let barcodeText = barcodeResult.text;
         let detectedCodeType = normalizeCodeType(barcodeResult.codeType);
-        const { text, productName: scannedName, productNameConfidence } = await scanText(c.imageDataUrl);
+        const { text, productName: scannedName, productNameConfidence, detectedTextStore } = await scanText(c.imageDataUrl);
         if (!barcodeText && detectedCodeType !== "qr") {
           barcodeText = extractBarcodeNumberGuess(text);
           if (barcodeText) detectedCodeType = "barcode";
         }
-        const detectedStore = detectedCodeType === "qr" ? "" : detectStoreFromBarcode(barcodeText);
+        const detectedStore = detectedCodeType === "qr" ? "" : detectStoreFromBarcode(barcodeText) || detectedTextStore;
         const detectedDate = extractExpiryDate(text);
         const detectedName = productNameConfidence === "high" ? scannedName : "";
         const suggestedName = productNameConfidence === "low" ? scannedName : "";
@@ -2693,12 +2693,12 @@ export default function CouponApp() {
         const barcodeResult = await scanBarcodeWithCrop(c.imageDataUrl);
         let barcodeText = barcodeResult.text;
         let detectedCodeType = normalizeCodeType(barcodeResult.codeType);
-        const { text, productName: scannedName, productNameConfidence } = await scanText(c.imageDataUrl);
+        const { text, productName: scannedName, productNameConfidence, detectedTextStore } = await scanText(c.imageDataUrl);
         if (!barcodeText && detectedCodeType !== "qr") {
           barcodeText = extractBarcodeNumberGuess(text);
           if (barcodeText) detectedCodeType = "barcode";
         }
-        const detectedStore = detectedCodeType === "qr" ? "" : detectStoreFromBarcode(barcodeText);
+        const detectedStore = detectedCodeType === "qr" ? "" : detectStoreFromBarcode(barcodeText) || detectedTextStore;
         const detectedDate = extractExpiryDate(text);
         const detectedName = productNameConfidence === "high" ? scannedName : "";
         const suggestedName = productNameConfidence === "low" ? scannedName : "";

@@ -23,6 +23,49 @@ export function detectStoreFromBarcode(rawText) {
   return rule ? rule.key : "";
 }
 
+function editDistance(left, right) {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= left.length; i++) {
+    let diagonal = previous[0];
+    previous[0] = i;
+    for (let j = 1; j <= right.length; j++) {
+      const above = previous[j];
+      previous[j] = Math.min(
+        previous[j] + 1,
+        previous[j - 1] + 1,
+        diagonal + (left[i - 1] === right[j - 1] ? 0 : 1)
+      );
+      diagonal = above;
+    }
+  }
+  return previous[right.length];
+}
+
+function normalizeJapaneseStoreText(value) {
+  return (value || "")
+    .normalize("NFKC")
+    .replace(/[ぁ-ん]/g, (char) => String.fromCharCode(char.charCodeAt(0) + 0x60))
+    .replace(/[^ァ-ヺー]/g, "");
+}
+
+// セブンの無料クーポンは印字バーコードがOCR/デコードできず、桁数判定だけでは
+// 店舗を特定できないことがある。公式ドメインか、券面上部のロゴOCRだけを補助根拠にする。
+export function detectStoreFromText(lines, imageHeight) {
+  const text = (lines || []).map((line) => line?.text || "").join("\n");
+  if (/coupon\.sej\.co\.jp/i.test(text)) return "seven";
+  if (!Number.isFinite(imageHeight) || imageHeight <= 0) return "";
+
+  const expected = "セブンイレブン";
+  return (lines || []).some((line) => {
+    if (!Number.isFinite(line?.y) || line.y > imageHeight * 0.35) return false;
+    const candidate = normalizeJapaneseStoreText(line.text);
+    // 上部の短い店舗ロゴ行に限定し、OCRで濁点や似た字が崩れたケースだけ許容する。
+    if (candidate.length < 6 || candidate.length > 10) return false;
+    if (!candidate.startsWith("セ") || !candidate.includes("ン") || !candidate.includes("イ")) return false;
+    return editDistance(candidate, expected) <= 3;
+  }) ? "seven" : "";
+}
+
 function loadImage(src) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -872,6 +915,7 @@ export async function scanText(imageDataUrl, onProgress) {
       productCropRecovered,
       productName: productReading.name,
       productNameConfidence: productReading.confidence,
+      detectedTextStore: detectStoreFromText(lines, normalCanvas?.height),
     };
   } finally {
     await worker.terminate();

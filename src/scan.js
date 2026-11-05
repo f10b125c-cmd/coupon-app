@@ -961,6 +961,34 @@ function normalizeDeadlineYear(year) {
   return year;
 }
 
+function extractYearlessExpiryDate(text) {
+  const compact = normalizeDigits(text).replace(/\s+/g, "");
+  // 月日だけの数字は商品名やクーポン番号に混ざるため、期限ラベルがある場合に限定する。
+  if (!/(?:引換|利用|有効)?期限|(?:引換|利用)期間/.test(compact)) return "";
+
+  const today = new Date();
+  const currentYear = today.getFullYear();
+  const currentMonth = today.getMonth() + 1;
+  const matches = [...compact.matchAll(/(\d{1,2})月(\d{1,2})日/g)];
+  let latest = "";
+  let previousMonth = 0;
+  let year = currentYear;
+  // 年明け直後に「12月〜1月」の期間を読んだ場合、開始日は前年として扱う。
+  if (matches.length > 1 && currentMonth <= 3 && Number(matches[0][1]) >= 10) year--;
+  for (const match of matches) {
+    const month = Number(match[1]);
+    const day = Number(match[2]);
+    // 年末の単独期限や、12月から翌年1月へまたぐ利用期間を扱う。
+    if ((previousMonth && month < previousMonth) || (!previousMonth && currentMonth >= 10 && month <= 3)) {
+      year++;
+    }
+    const iso = toValidIsoDate(String(year), month, day);
+    if (iso && iso > latest) latest = iso;
+    previousMonth = month;
+  }
+  return latest;
+}
+
 // ローソン券面の「店舗利用期限 YYYY/MM/DD 23:59まで」は文字が小さく、
 // 実画像では「2026708724」「2026/0S/24」のようにスラッシュや8が崩れた。
 // 23:59の直前だけを期限欄として扱い、既存の日付抽出とは独立して補正する。
@@ -1020,7 +1048,7 @@ export function extractExpiryDate(text) {
     }
     if (latest) break;
   }
-  return latest;
+  return latest || extractYearlessExpiryDate(normalized);
 }
 
 // バーコードの画像自体は桁数が多いと（特にファミマの28桁など）スマホのスクショ解像度では

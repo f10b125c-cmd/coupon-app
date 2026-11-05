@@ -535,6 +535,22 @@ test("ローソン券の店舗利用期限をOCRの崩れから復元する", ()
   );
 });
 
+test("年が省略された引換期間の日付に現在年を補う", () => {
+  const currentYear = new Date().getFullYear();
+  assert.equal(
+    extractExpiryDate("引換 期間 :11 月 17 日 ( 火 ) ま で"),
+    `${currentYear}-11-17`
+  );
+  const currentMonth = new Date().getMonth() + 1;
+  const januaryExpiryYear = currentMonth <= 3 ? currentYear : currentYear + 1;
+  assert.equal(
+    extractExpiryDate("引換期間：12月20日〜1月10日まで"),
+    `${januaryExpiryYear}-01-10`
+  );
+  assert.equal(extractExpiryDate("本麒麟 350ml 11月17日"), "");
+  assert.equal(extractExpiryDate("引換期間：2月30日まで"), "");
+});
+
 test("既存の日付パターンも従来どおり読む", () => {
   assert.equal(extractExpiryDate("利用期間 2026/08/01〜2026/08/31"), "2026-08-31");
 });

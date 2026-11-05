@@ -275,6 +275,11 @@ test("ローソンの本麒麟は見出しのOCR崩れを商品名へ補正す�
     assert.equal(extractProductNameForRescan(lines(heading), "長期低温熟成"), expected, heading);
   }
 
+  // cp.kirin.jpの実画像では見出しが「本上包 (350ml 向)」と読まれた。
+  const kirinSiteOcr = "本 上 包 (350ml 向 ) 無料 引き 換え クー ポン";
+  assert.equal(extractProductNameGuess(lines(kirinSiteOcr)), expected);
+  assert.equal(extractProductNameForRescan(lines(kirinSiteOcr), "© amma 7a00se"), expected);
+
   // 350ml券でも別の商品名には専用補正を使わない。
   assert.notEqual(
     extractProductNameGuess(lines("本搾り (350ml 缶) 無料引き換えクーポン")),
@@ -282,6 +287,10 @@ test("ローソンの本麒麟は見出しのOCR崩れを商品名へ補正す�
   );
   assert.notEqual(
     extractProductNameGuess(lines("本 上 妥 麟 350ml 缶")),
+    expected
+  );
+  assert.notEqual(
+    extractProductNameGuess(lines("本 上 包 (350ml 向)")),
     expected
   );
 });

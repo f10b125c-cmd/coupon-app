@@ -1415,7 +1415,7 @@ function extractKirinHarekazeProduct(lines) {
 }
 
 // ローソンの「本麒麟(350ml缶) 無料引き換えクーポン」は、実画像で見出しの
-// 「本麒麟」が「本上妥麟」「本雪麟」「本上央鹿」などに誤読され、缶の副題
+// 「本麒麟」が「本上妥麟」「本雪麟」「本上央鹿」「本上包」などに誤読され、缶の副題
 // 「長期低温熟成」や端末表示が商品名として採用されていた。
 // 本麒麟らしい文字列・350ml缶・無料引換クーポンが近接して揃う券だけ補正する。
 function extractKirinHonKirinProduct(lines) {
@@ -1430,8 +1430,10 @@ function extractKirinHonKirinProduct(lines) {
         if (gap < 0 || gap > height * 2.2) break;
       }
       paragraph += tidySpacing(candidates[end].text || "").replace(/\s+/g, "");
-      const hasHonKirin = /本.{0,4}(?:麒|麟|鹿)/u.test(paragraph);
-      const has350MlCan = /350m(?:l|1|i)缶/i.test(paragraph);
+      // cp.kirin.jpの実券では「本上包(350ml向)」まで崩れたが、
+      // 350ml・無料引換クーポンも同じ見出しにあるときだけ本麒麟へ補正する。
+      const hasHonKirin = /本.{0,4}(?:麒|麟|鹿|包)/u.test(paragraph);
+      const has350MlCan = /350m(?:l|1|i)(?:缶|向)/i.test(paragraph);
       const hasFreeExchangeCoupon = /無料.{0,3}引.{0,3}換.{0,3}クー?ポン/u.test(paragraph);
       if (hasHonKirin && has350MlCan && hasFreeExchangeCoupon) {
         return "本麒麟 350ml缶";

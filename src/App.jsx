@@ -31,6 +31,7 @@ import {
 import { handoffImageToGoogleLens, selectLensImage } from "./lensSearch.js";
 import { sortCouponsByProduct } from "./couponSort.js";
 import { findDuplicateCoupon } from "./couponDuplicate.js";
+import { takePendingLineScanIds } from "./lineAutoScan.js";
 
 /* ---------------------------------------------------------
    フォント読み込み（やわらかい丸ゴシックの世界観に寄せる）
@@ -1013,7 +1014,12 @@ function DetailModal({
   //   そのときはクラウド保存用に圧縮済みの画像しか残っておらず、バーコードの細い線が潰れて
   //   読み取れなくなっていることが多いため、再スキャンしても無駄になりやすい）
   useEffect(() => {
-    if (coupon.inbox && coupon.imageDataUrl && !coupon.autoScanned) {
+    if (
+      coupon.inbox &&
+      coupon.imageDataUrl &&
+      !coupon.autoScanned &&
+      coupon.source !== "line"
+    ) {
       autoScan();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2326,6 +2332,7 @@ export default function CouponApp() {
   const [selectedIds, setSelectedIds] = useState([]);
   const [expiryBannerDismissed, setExpiryBannerDismissed] = useState(false);
   const [bulkScanProgress, setBulkScanProgress] = useState(null);
+  const autoLineScanAttemptedRef = useRef(new Set());
   const [toasts, setToasts] = useState([]);
   const [syncError, setSyncError] = useState(false);
 
@@ -2572,9 +2579,11 @@ export default function CouponApp() {
   // 未整理のスクショ付きクーポンをまとめて自動読み取りする
   // 追加時に解析済みでも、商品名・店舗・期限・バーコードのいずれかが空なら
   // 改善後のOCRで再解析する。すべて取得済みの券だけを対象外にする。
-  async function bulkScanInbox() {
+  async function bulkScanInbox({ couponIds = null, showResult = true } = {}) {
+    const targetIdSet = couponIds ? new Set(couponIds) : null;
     const targets = coupons.filter(
       (c) =>
+        (!targetIdSet || targetIdSet.has(c.id)) &&
         c.inbox &&
         c.imageDataUrl &&
         (!c.autoScanned ||
@@ -2586,7 +2595,7 @@ export default function CouponApp() {
             (!c.barcodeImageDataUrl || !c.couponPreviewImageDataUrl)))
     );
     if (!targets.length) {
-      notify("再読み取りが必要な未整理クーポンはありません。");
+      if (showResult) notify("再読み取りが必要な未整理クーポンはありません。");
       return;
     }
 
@@ -2661,16 +2670,33 @@ export default function CouponApp() {
 
     setBulkScanProgress(null);
     const needsReview = targets.length - autoMovedCount;
-    window.alert(
+    const summary =
       `${targets.length}件を読み取りました（商品名を確定: ${confidentNameCount}件` +
-        (candidateCount ? `、確認候補: ${candidateCount}件` : "") +
-        `、未使用に自動登録: ${autoMovedCount}件` +
-        (needsReview
-          ? `、要確認のため未整理に残したもの: ${needsReview}件${dupCount ? `／うち重複の疑い: ${dupCount}件` : ""}`
-          : "") +
-        "）。"
-    );
+      (candidateCount ? `、確認候補: ${candidateCount}件` : "") +
+      `、未使用に自動登録: ${autoMovedCount}件` +
+      (needsReview
+        ? `、要確認のため未整理に残したもの: ${needsReview}件${dupCount ? `／うち重複の疑い: ${dupCount}件` : ""}`
+        : "") +
+      "）。";
+    if (showResult) {
+      window.alert(summary);
+    } else {
+      notify(
+        `LINEからの${targets.length}件を自動で読み取りました。` +
+          (needsReview ? `うち${needsReview}件は確認のため未整理に残しています。` : "")
+      );
+    }
   }
+
+  // LINE webhookで届いた未読取画像は同期された時点で自動処理する。
+  // 1回の受信で失敗しても描画・同期のたびにループしないようIDを記録する。
+  useEffect(() => {
+    if (!loaded || bulkScanProgress) return;
+    const couponIds = takePendingLineScanIds(coupons, autoLineScanAttemptedRef.current);
+    if (couponIds.length) {
+      void bulkScanInbox({ couponIds, showResult: false });
+    }
+  }, [coupons, loaded, bulkScanProgress]);
 
   // 選択したクーポンをまとめて読み取り直す。
   // 商品名は高信頼度の読み取りだけ反映し、弱い結果は確認候補として分けて保存する。

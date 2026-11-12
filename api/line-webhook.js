@@ -95,7 +95,7 @@ async function saveCouponFromLine(db, messageId, imageDataUrl) {
   const now = new Date().toISOString();
   const id = `line-${messageId}`;
   // アプリ側のデータモデル（App.jsx quickAdd）と互換の形で保存する。
-  // autoScanned:false なので「まとめて自動読み取り」の対象になる。
+  // autoScanned:false なので、アプリへの同期後にフロント側で自動読み取りされる。
   await db.doc(`households/${HOUSEHOLD_ID}/coupons/${id}`).set({
     id,
     title: "",

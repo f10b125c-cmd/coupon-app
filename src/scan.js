@@ -619,7 +619,8 @@ function makeDeadlineCrop(
   highContrast = false,
   startRatio = 0.65,
   endRatio = 1,
-  redOnly = false
+  redOnly = false,
+  whiteOnRed = false
 ) {
   const sourceY = Math.floor(img.height * startRatio);
   const sourceEnd = Math.min(img.height, Math.ceil(img.height * endRatio));
@@ -655,7 +656,11 @@ function makeDeadlineCrop(
         pixels[i] > 100 &&
         pixels[i] > pixels[i + 1] * 1.2 &&
         pixels[i] > pixels[i + 2] * 1.06;
-      const value = redOnly
+      const value = whiteOnRed
+        ? isDeadlineRed
+          ? 255
+          : 0
+        : redOnly
         ? isDeadlineRed
           ? 0
           : 255
@@ -685,7 +690,8 @@ function findDeadlineRedBand(img) {
   const rows = [];
   const minRedPixels = Math.max(6, Math.round(canvas.width * 0.015));
 
-  for (let y = Math.floor(canvas.height * 0.75); y < canvas.height; y++) {
+  // 期限が下端ではなく中央寄りの赤帯にある券もあるため、下半分全体から探す。
+  for (let y = Math.floor(canvas.height * 0.45); y < canvas.height; y++) {
     let count = 0;
     for (let x = 0; x < canvas.width; x++) {
       const i = (y * canvas.width + x) * 4;
@@ -708,7 +714,7 @@ function findDeadlineRedBand(img) {
 
   const padding = Math.max(8, Math.round(canvas.height * 0.018));
   return [
-    Math.max(0.72, (start - padding) / canvas.height),
+    Math.max(0.45, (start - padding) / canvas.height),
     Math.min(1, (end + padding) / canvas.height),
   ];
 }
@@ -766,11 +772,15 @@ export async function scanText(imageDataUrl, onProgress) {
     invertedTarget = invertCanvas(canvas).toDataURL("image/png");
     const [deadlineStart, deadlineEnd] = findDeadlineRedBand(img);
     deadlineTargets = [
+      // 期限帯は日本語を含めて1行OCRする。数字限定だと「年/月/日」を落として誤読する。
+      makeDeadlineCrop(img, false, deadlineStart, deadlineEnd),
       makeDeadlineCrop(img),
       makeDeadlineCrop(img, true),
       // 実画像では期限の赤文字が高さの約92〜94%にある。バーコードを除外し、
       // この1行だけを読む候補も用意して数字列へOCRを集中させる。
       makeDeadlineCrop(img, true, deadlineStart, deadlineEnd, true),
+      // 白文字・赤背景の期限帯用。赤背景を白、文字を黒にしてOCRへ渡す。
+      makeDeadlineCrop(img, true, deadlineStart, deadlineEnd, false, true),
     ];
   } catch (e) {
     // 縮小に失敗しても元画像でOCRを続行する（反転パスはスキップ）
@@ -883,17 +893,23 @@ export async function scanText(imageDataUrl, onProgress) {
     if (deadlineTargets.length && !extractExpiryDate(fullText)) {
       for (let index = 0; index < deadlineTargets.length; index++) {
         try {
-          const highContrast = index >= 1;
+          const japaneseDeadlineLine = index === 0;
+          const highContrast = index >= 2;
+          const pageSegMode =
+            japaneseDeadlineLine || index >= 3
+              ? PSM.SINGLE_LINE
+              : index === 2
+                ? PSM.SPARSE_TEXT
+                : PSM.SINGLE_BLOCK;
           const { data: deadlineData } = await withTimeout(
             worker.recognize(
               deadlineTargets[index],
-              highContrast
+              highContrast && !japaneseDeadlineLine
                 ? {
-                    tessedit_pageseg_mode:
-                      index === 2 ? PSM.SINGLE_LINE : PSM.SPARSE_TEXT,
+                    tessedit_pageseg_mode: pageSegMode,
                     tessedit_char_whitelist: "0123456789/:.-",
                   }
-                : { tessedit_pageseg_mode: PSM.SINGLE_BLOCK },
+                : { tessedit_pageseg_mode: pageSegMode },
               { text: true }
             ),
             45000,
